@@ -18,6 +18,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
   Bold,
+  ChevronLeft,
   CheckSquare,
   ChevronDown,
   ChevronRight,
@@ -70,7 +71,9 @@ import {
   useState,
   type DragEvent,
   type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import { api } from "@/lib/api";
@@ -90,9 +93,52 @@ import { Button } from "@/components/ui/button";
 
 type Pane = "notebooks" | "memos" | "editor";
 type MemoView = "notebook" | "trash";
+type MemoFilterMode = "all" | "tagged" | "untagged" | "pinned";
+type MemoSortMode = "updated-desc" | "created-desc" | "title-asc";
+type MemoListDensity = "preview" | "compact";
+type MobileBottomNavItem = "home" | "search" | "assets" | "settings";
+type MemoContextMenuState = { memo: MemoSummary; x: number; y: number };
 type NotebookDropPosition = "before" | "inside" | "after";
 
 const IMAGE_COMPRESSION_STORAGE_KEY = "edgeever.imageCompressionEnabled";
+const MEMO_LONG_PRESS_DELAY_MS = 520;
+const MEMO_LONG_PRESS_MOVE_TOLERANCE_PX = 14;
+
+const useDismissableLayer = <T extends HTMLElement>(open: boolean, onClose: () => void) => {
+  const ref = useRef<T | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const node = ref.current;
+
+      if (!node || node.contains(event.target as Node)) {
+        return;
+      }
+
+      onClose();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose, open]);
+
+  return ref;
+};
 
 export const App = () => {
   const queryClient = useQueryClient();
@@ -178,12 +224,14 @@ const WorkspaceApp = ({
   const [selectedNotebookId, setSelectedNotebookId] = useState<string | null>(null);
   const [selectedMemoId, setSelectedMemoId] = useState<string | null>(null);
   const [selectedMemoIds, setSelectedMemoIds] = useState<Set<string>>(new Set());
+  const [memoSelectionMode, setMemoSelectionMode] = useState(false);
   const [multiSelectKeyDown, setMultiSelectKeyDown] = useState(false);
   const [imageCompressionEnabled, setImageCompressionEnabled] = useState(readImageCompressionPreference);
   const [assetsOpen, setAssetsOpen] = useState(false);
   const [tagsOpen, setTagsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mobileNotebookPickerOpen, setMobileNotebookPickerOpen] = useState(false);
+  const [mobileBottomNavActive, setMobileBottomNavActive] = useState<MobileBottomNavItem>("home");
   const [mobileSearchFocusToken, setMobileSearchFocusToken] = useState(0);
   const [search, setSearch] = useState("");
   const [syncSummary, setSyncSummary] = useState<SyncQueueSummary>(emptySyncQueueSummary);
@@ -219,15 +267,33 @@ const WorkspaceApp = ({
   });
 
   const notebooks = notebooksQuery.data?.notebooks ?? [];
+  const defaultMemoNotebookId =
+    selectedNotebookId ?? notebooks.find((notebook) => notebook.slug === "inbox")?.id ?? notebooks[0]?.id ?? null;
+  const canCreateMemo = Boolean(defaultMemoNotebookId && memoView !== "trash");
+  const memoSelectionModeActive = memoSelectionMode || selectedMemoIds.size > 0;
 
-  useEffect(() => {
-    if (!selectedNotebookId && notebooks.length > 0) {
-      setSelectedNotebookId(notebooks[0].id);
-    }
-  }, [notebooks, selectedNotebookId]);
+  const clearMemoSelection = useCallback(() => {
+    setSelectedMemoIds(new Set());
+    setMemoSelectionMode(false);
+  }, []);
+
+  const replaceMemoSelection = useCallback((memoIds: string[]) => {
+    setSelectedMemoIds(new Set(memoIds));
+    setMemoSelectionMode(true);
+  }, []);
+
+  const enterMemoSelectionMode = useCallback(() => {
+    setMemoSelectionMode(true);
+    setActivePane("memos");
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        clearMemoSelection();
+        return;
+      }
+
       if (event.ctrlKey || event.metaKey || event.key === "Control" || event.key === "Meta") {
         setMultiSelectKeyDown(true);
       }
@@ -248,7 +314,7 @@ const WorkspaceApp = ({
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("blur", handleBlur);
     };
-  }, []);
+  }, [clearMemoSelection]);
 
   useEffect(() => {
     writeImageCompressionPreference(imageCompressionEnabled);
@@ -296,10 +362,13 @@ const WorkspaceApp = ({
         q: search,
         trash: memoView === "trash",
       }),
-    enabled: memoView === "trash" || Boolean(selectedNotebookId),
   });
 
   const memos = memosQuery.data?.memos ?? [];
+  const selectedMemoIndex = selectedMemoId ? memos.findIndex((memo) => memo.id === selectedMemoId) : -1;
+  const previousMemoId = selectedMemoIndex > 0 ? memos[selectedMemoIndex - 1]?.id : null;
+  const nextMemoId =
+    selectedMemoIndex >= 0 && selectedMemoIndex < memos.length - 1 ? memos[selectedMemoIndex + 1]?.id : null;
 
   useEffect(() => {
     if (memos.length === 0) {
@@ -367,7 +436,7 @@ const WorkspaceApp = ({
   const mergeMutation = useMutation({
     mutationFn: api.mergeMemos,
     onSuccess: async (data) => {
-      setSelectedMemoIds(new Set());
+      clearMemoSelection();
       await queryClient.invalidateQueries({ queryKey: ["memos"] });
       queryClient.setQueryData(["memo", data.memo.id], { memo: data.memo });
       setSelectedMemoId(data.memo.id);
@@ -378,16 +447,41 @@ const WorkspaceApp = ({
   const moveMemosMutation = useMutation({
     mutationFn: api.moveMemos,
     onSuccess: async () => {
-      setSelectedMemoIds(new Set());
+      clearMemoSelection();
       await queryClient.invalidateQueries({ queryKey: ["memos"] });
       await queryClient.invalidateQueries({ queryKey: ["memo"] });
+    },
+  });
+
+  const deleteMemosMutation = useMutation({
+    mutationFn: api.deleteMemos,
+    onSuccess: async (_, variables) => {
+      const deletedMemoIds = new Set(variables.memoIds);
+
+      clearMemoSelection();
+
+      if (selectedMemoId && deletedMemoIds.has(selectedMemoId)) {
+        setSelectedMemoId(null);
+        setActivePane("memos");
+      }
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["memos"] }),
+        queryClient.invalidateQueries({ queryKey: ["memo"] }),
+        queryClient.invalidateQueries({ queryKey: ["resources"] }),
+      ]);
     },
   });
 
   const deleteMemoMutation = useMutation({
     mutationFn: ({ memoId, permanent }: { memoId: string; permanent?: boolean }) =>
       api.deleteMemo(memoId, { permanent }),
-    onSuccess: async () => {
+    onSuccess: async (_data, variables) => {
+      if (selectedMemoId === variables.memoId) {
+        setSelectedMemoId(null);
+        setActivePane("memos");
+      }
+
       await queryClient.invalidateQueries({ queryKey: ["memos"] });
     },
   });
@@ -441,12 +535,13 @@ const WorkspaceApp = ({
   };
 
   const handleCreateMemo = () => {
-    if (!selectedNotebookId || memoView === "trash") {
+    if (!defaultMemoNotebookId || memoView === "trash") {
       return;
     }
 
+    setMobileBottomNavActive("home");
     createMemoMutation.mutate({
-      notebookId: selectedNotebookId,
+      notebookId: defaultMemoNotebookId,
       title: DEFAULT_MEMO_TITLE,
       contentMarkdown: "",
       tags: [],
@@ -488,21 +583,82 @@ const WorkspaceApp = ({
     });
   };
 
+  const handleMoveMemoFromList = (memoId: string, targetNotebookId: string) => {
+    if (memoView === "trash") {
+      return;
+    }
+
+    moveMemosMutation.mutate({
+      memoIds: [memoId],
+      notebookId: targetNotebookId,
+    });
+  };
+
   const handleMerge = () => {
-    if (!selectedNotebookId || selectedMemoIds.size < 2 || memoView === "trash") {
+    if (selectedMemoIds.size < 2 || memoView === "trash") {
       return;
     }
 
     mergeMutation.mutate({
       memoIds: Array.from(selectedMemoIds),
-      notebookId: selectedNotebookId,
+      notebookId: selectedNotebookId ?? undefined,
     });
+  };
+
+  const handleDeleteSelectedMemos = () => {
+    if (selectedMemoIds.size === 0) {
+      return;
+    }
+
+    const count = selectedMemoIds.size;
+    const permanent = memoView === "trash";
+    const confirmed = window.confirm(
+      permanent
+        ? `永久删除选中的 ${count} 条笔记？这个操作不可恢复。`
+        : `删除选中的 ${count} 条笔记？删除后可在回收站恢复。`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    deleteMemosMutation.mutate({
+      memoIds: Array.from(selectedMemoIds),
+      permanent,
+    });
+  };
+
+  const handleDeleteMemoFromList = (memoId: string) => {
+    const permanent = memoView === "trash";
+    const confirmed = window.confirm(
+      permanent ? "永久删除这条笔记？这个操作不可恢复。" : "删除这条笔记？删除后可在回收站恢复。"
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    deleteMemoMutation.mutate({ memoId, permanent });
+  };
+
+  const handleRestoreMemoFromList = (memoId: string) => {
+    restoreMemoMutation.mutate(memoId);
   };
 
   const handleSelectNotebook = (notebookId: string) => {
     setMemoView("notebook");
     setSelectedNotebookId(notebookId);
-    setSelectedMemoIds(new Set());
+    setMobileBottomNavActive("home");
+    clearMemoSelection();
+    setMobileNotebookPickerOpen(false);
+    setActivePane("memos");
+  };
+
+  const handleSelectAllMemos = () => {
+    setMemoView("notebook");
+    setSelectedNotebookId(null);
+    setMobileBottomNavActive("home");
+    clearMemoSelection();
     setMobileNotebookPickerOpen(false);
     setActivePane("memos");
   };
@@ -512,13 +668,36 @@ const WorkspaceApp = ({
       setMemoView("notebook");
     }
 
-    setSelectedMemoIds(new Set());
+    setMobileBottomNavActive("home");
+    setSelectedNotebookId(null);
+    clearMemoSelection();
     setActivePane("memos");
   };
 
   const handleMobileSearch = () => {
+    setMobileBottomNavActive("search");
     setActivePane("memos");
     setMobileSearchFocusToken((value) => value + 1);
+  };
+
+  const handleOpenAssets = () => {
+    setMobileBottomNavActive("assets");
+    setAssetsOpen(true);
+  };
+
+  const handleOpenSettings = () => {
+    setMobileBottomNavActive("settings");
+    setSettingsOpen(true);
+  };
+
+  const handleCloseAssets = () => {
+    setAssetsOpen(false);
+    setMobileBottomNavActive("home");
+  };
+
+  const handleCloseSettings = () => {
+    setSettingsOpen(false);
+    setMobileBottomNavActive("home");
   };
 
   return (
@@ -536,18 +715,30 @@ const WorkspaceApp = ({
               user={user}
               notebooks={notebooks}
               selectedNotebookId={selectedNotebookId}
+              view={memoView}
               isLoading={notebooksQuery.isLoading}
+              canCreateMemo={canCreateMemo}
+              isCreatingMemo={createMemoMutation.isPending}
               onSelect={(notebookId) => {
                 setMemoView("notebook");
                 setSelectedNotebookId(notebookId);
-                setSelectedMemoIds(new Set());
+                clearMemoSelection();
                 setActivePane("memos");
               }}
+              onCreateMemo={handleCreateMemo}
               onCreateNotebook={handleCreateNotebook}
               onRenameNotebook={handleRenameNotebook}
               onDeleteNotebook={handleDeleteNotebook}
               onMoveNotebook={handleMoveNotebook}
-              onBackToList={() => setActivePane("memos")}
+              onBackToList={() => {
+                if (memoView === "trash") {
+                  setMemoView("notebook");
+                }
+
+                setSelectedNotebookId(null);
+                clearMemoSelection();
+                setActivePane("memos");
+              }}
               onLogout={onLogout}
               isLoggingOut={isLoggingOut}
               imageCompressionEnabled={imageCompressionEnabled}
@@ -556,12 +747,14 @@ const WorkspaceApp = ({
               isOnline={isOnline}
               isSyncingQueuedChanges={isSyncingQueuedChanges}
               onSyncQueuedChanges={() => void runQueuedSync()}
-              onOpenAssets={() => setAssetsOpen(true)}
+              onOpenAssets={handleOpenAssets}
               onOpenTags={() => setTagsOpen(true)}
-              onOpenSettings={() => setSettingsOpen(true)}
+              onOpenSettings={handleOpenSettings}
               onOpenTrash={() => {
                 setMemoView("trash");
-                setSelectedMemoIds(new Set());
+                setSelectedNotebookId(null);
+                setMobileBottomNavActive("home");
+                clearMemoSelection();
                 setSelectedMemoId(null);
                 setActivePane("memos");
               }}
@@ -581,24 +774,58 @@ const WorkspaceApp = ({
               memos={memos}
               selectedMemoId={selectedMemoId}
               selectedMemoIds={selectedMemoIds}
+              selectionMode={memoSelectionModeActive}
               search={search}
               searchFocusToken={mobileSearchFocusToken}
+              canCreateMemo={canCreateMemo}
               isLoading={memosQuery.isLoading}
               isCreating={createMemoMutation.isPending}
               isMerging={mergeMutation.isPending}
               isMoving={moveMemosMutation.isPending}
+              isDeleting={deleteMemosMutation.isPending || deleteMemoMutation.isPending}
               multiSelectKeyDown={multiSelectKeyDown}
               onOpenNotebookPicker={() => setMobileNotebookPickerOpen(true)}
               onSearch={setSearch}
               onCreateMemo={handleCreateMemo}
+              onClearSelection={clearMemoSelection}
+              onEnterSelectionMode={enterMemoSelectionMode}
+              onReplaceSelection={replaceMemoSelection}
+              onOpenAssets={handleOpenAssets}
+              onOpenTags={() => setTagsOpen(true)}
+              onOpenSettings={handleOpenSettings}
+              onOpenTrash={() => {
+                setMemoView("trash");
+                setSelectedNotebookId(null);
+                setMobileBottomNavActive("home");
+                clearMemoSelection();
+                setSelectedMemoId(null);
+                setActivePane("memos");
+              }}
               onOpenMemo={(memoId) => {
                 setSelectedMemoId(memoId);
                 setActivePane("editor");
               }}
-              onToggleMemo={(memoId) => {
-                setSelectedMemoIds((current) => toggleMemoSelection(current, memoId));
+              onToggleMemo={(memoId, rangeMemoIds) => {
+                setMemoSelectionMode(true);
+                setSelectedMemoIds((current) => {
+                  if (!rangeMemoIds?.length) {
+                    return toggleMemoSelection(current, memoId);
+                  }
+
+                  const next = new Set(current);
+
+                  for (const rangeMemoId of rangeMemoIds) {
+                    next.add(rangeMemoId);
+                  }
+
+                  return next;
+                });
               }}
               onMerge={handleMerge}
+              onDeleteMemo={handleDeleteMemoFromList}
+              onRestoreMemo={handleRestoreMemoFromList}
+              onMoveMemo={handleMoveMemoFromList}
+              onDeleteSelectedMemos={handleDeleteSelectedMemos}
               onMoveSelectedMemos={handleMoveSelectedMemos}
             />
           </section>
@@ -610,7 +837,19 @@ const WorkspaceApp = ({
               notebooks={notebooks}
               isLoading={memoQuery.isLoading}
               imageCompressionEnabled={imageCompressionEnabled}
+              hasNextMemo={Boolean(nextMemoId)}
+              hasPreviousMemo={Boolean(previousMemoId)}
               onBackToList={() => setActivePane("memos")}
+              onOpenNextMemo={() => {
+                if (nextMemoId) {
+                  setSelectedMemoId(nextMemoId);
+                }
+              }}
+              onOpenPreviousMemo={() => {
+                if (previousMemoId) {
+                  setSelectedMemoId(previousMemoId);
+                }
+              }}
               onSaved={async (memo) => {
                 queryClient.setQueryData(["memo", memo.id], { memo });
                 await queryClient.invalidateQueries({ queryKey: ["memos"] });
@@ -632,17 +871,18 @@ const WorkspaceApp = ({
           </section>
         </main>
       </div>
-      {assetsOpen ? <AssetsDialog onClose={() => setAssetsOpen(false)} /> : null}
+      {assetsOpen ? <AssetsDialog onClose={handleCloseAssets} /> : null}
       {tagsOpen ? <TagsDialog onClose={() => setTagsOpen(false)} /> : null}
-      {settingsOpen ? <SettingsDialog onClose={() => setSettingsOpen(false)} /> : null}
-      {activePane !== "editor" ? (
+      {settingsOpen ? <SettingsDialog onClose={handleCloseSettings} /> : null}
+      {activePane !== "editor" && !memoSelectionModeActive ? (
         <MobileBottomNav
-          canCreateMemo={Boolean(selectedNotebookId && memoView !== "trash")}
+          activeItem={mobileBottomNavActive}
+          canCreateMemo={canCreateMemo}
           isCreating={createMemoMutation.isPending}
           onCreateMemo={handleCreateMemo}
           onHome={handleMobileHome}
-          onOpenAssets={() => setAssetsOpen(true)}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenAssets={handleOpenAssets}
+          onOpenSettings={handleOpenSettings}
           onSearch={handleMobileSearch}
         />
       ) : null}
@@ -651,6 +891,7 @@ const WorkspaceApp = ({
           notebooks={notebooks}
           selectedNotebookId={selectedNotebookId}
           onClose={() => setMobileNotebookPickerOpen(false)}
+          onSelectAll={handleSelectAllMemos}
           onSelect={handleSelectNotebook}
         />
       ) : null}
@@ -811,8 +1052,12 @@ const NotebookPane = ({
   user,
   notebooks,
   selectedNotebookId,
+  view,
   isLoading,
+  canCreateMemo,
+  isCreatingMemo,
   onSelect,
+  onCreateMemo,
   onCreateNotebook,
   onRenameNotebook,
   onDeleteNotebook,
@@ -835,8 +1080,12 @@ const NotebookPane = ({
   user: AuthUser | null;
   notebooks: Notebook[];
   selectedNotebookId: string | null;
+  view: MemoView;
   isLoading: boolean;
+  canCreateMemo: boolean;
+  isCreatingMemo: boolean;
   onSelect: (notebookId: string) => void;
+  onCreateMemo: () => void;
   onCreateNotebook: (parentId?: string | null) => void;
   onRenameNotebook: (notebook: Notebook) => void;
   onDeleteNotebook: (notebook: Notebook) => void;
@@ -863,11 +1112,11 @@ const NotebookPane = ({
         <div>
           <div className="text-base font-semibold tracking-normal lg:hidden">笔记本</div>
           <div className="hidden text-base font-semibold tracking-normal lg:block">EdgeEver</div>
-          <div className="text-xs text-slate-500">{user?.username ?? "Cloudflare-native notes"}</div>
+          <div className="text-xs text-slate-500">{user?.username ?? "边缘笔记工作区"}</div>
         </div>
         <div className="flex items-center gap-1">
           <Button className="lg:hidden" size="icon" variant="ghost" title="返回笔记列表" onClick={onBackToList}>
-            <LayoutList className="h-4 w-4" />
+            <ChevronLeft className="h-4 w-4" />
           </Button>
           <Button size="icon" variant="ghost" title="新建笔记本" onClick={() => onCreateNotebook(null)}>
             <Plus className="h-4 w-4" />
@@ -876,9 +1125,49 @@ const NotebookPane = ({
       </header>
 
       <div className="flex-1 overflow-y-auto px-3 py-4">
-        <div className="mb-3 flex items-center gap-2 px-2 text-xs font-semibold uppercase text-slate-500">
-          <Folder className="h-4 w-4" />
-          Notebooks
+        <Button
+          className="mb-4 hidden w-full justify-center lg:inline-flex"
+          size="md"
+          variant="solid"
+          title="新建笔记"
+          onClick={onCreateMemo}
+          disabled={!canCreateMemo || isCreatingMemo}
+        >
+          <FilePlus2 className="h-4 w-4" />
+          新建笔记
+        </Button>
+
+        <nav className="mb-4 space-y-1">
+          <SidebarNavButton
+            active={view === "notebook" && selectedNotebookId === null}
+            icon={<LayoutList className="h-4 w-4" />}
+            label="全部笔记"
+            onClick={onBackToList}
+          />
+          <SidebarNavButton icon={<Tags className="h-4 w-4" />} label="标签" onClick={onOpenTags} />
+          <SidebarNavButton icon={<Archive className="h-4 w-4" />} label="附件" onClick={onOpenAssets} />
+          <SidebarNavButton
+            active={view === "trash"}
+            icon={<Trash2 className="h-4 w-4" />}
+            label="回收站"
+            onClick={onOpenTrash}
+          />
+          <SidebarNavButton icon={<UserRound className="h-4 w-4" />} label="我的" onClick={onOpenSettings} />
+        </nav>
+
+        <div className="mb-3 flex items-center justify-between gap-2 px-2 text-xs font-semibold uppercase text-slate-500">
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <Folder className="h-4 w-4" />
+            笔记本
+          </span>
+          <button
+            className="flex h-6 w-6 items-center justify-center rounded-md text-slate-500 transition hover:bg-emerald-50 hover:text-emerald-800"
+            type="button"
+            title="新建笔记本"
+            onClick={() => onCreateNotebook(null)}
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
         </div>
 
         {isLoading ? (
@@ -919,25 +1208,12 @@ const NotebookPane = ({
             aria-label="粘贴图片时自动压缩"
           />
         </label>
-        <div className={cn("grid gap-2", authRequired ? "grid-cols-5" : "grid-cols-4")}>
-          <Button size="icon" variant="ghost" title="标签" onClick={onOpenTags}>
-            <Tags className="h-4 w-4" />
+        {authRequired ? (
+          <Button className="w-full justify-center" size="md" variant="ghost" onClick={onLogout} disabled={isLoggingOut}>
+            <LogOut className="h-4 w-4" />
+            退出登录
           </Button>
-          <Button size="icon" variant="ghost" title="资产" onClick={onOpenAssets}>
-            <Archive className="h-4 w-4" />
-          </Button>
-          <Button size="icon" variant="ghost" title="回收站" onClick={onOpenTrash}>
-            <Trash2 className="h-4 w-4" />
-          </Button>
-          <Button size="icon" variant="ghost" title="设置" onClick={onOpenSettings}>
-            <MoreHorizontal className="h-4 w-4" />
-          </Button>
-          {authRequired ? (
-            <Button size="icon" variant="ghost" title="退出登录" onClick={onLogout} disabled={isLoggingOut}>
-              <LogOut className="h-4 w-4" />
-            </Button>
-          ) : null}
-        </div>
+        ) : null}
       </footer>
     </div>
   );
@@ -991,6 +1267,30 @@ const SyncStatusBar = ({
   );
 };
 
+const SidebarNavButton = ({
+  active = false,
+  icon,
+  label,
+  onClick,
+}: {
+  active?: boolean;
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+}) => (
+  <button
+    className={cn(
+      "flex h-9 w-full items-center gap-3 rounded-md px-3 text-left text-sm font-medium transition",
+      active ? "bg-emerald-100 text-emerald-950" : "text-slate-700 hover:bg-emerald-50 hover:text-emerald-900"
+    )}
+    type="button"
+    onClick={onClick}
+  >
+    <span className="shrink-0">{icon}</span>
+    <span className="min-w-0 flex-1 truncate">{label}</span>
+  </button>
+);
+
 const getSyncStatusLabel = (summary: SyncQueueSummary, isOnline: boolean, isSyncing: boolean) => {
   if (!isOnline) {
     return summary.total > 0 ? `离线，${summary.total} 项待同步` : "离线";
@@ -1016,6 +1316,7 @@ const getSyncStatusLabel = (summary: SyncQueueSummary, isOnline: boolean, isSync
 };
 
 const MobileBottomNav = ({
+  activeItem,
   canCreateMemo,
   isCreating,
   onCreateMemo,
@@ -1024,6 +1325,7 @@ const MobileBottomNav = ({
   onOpenSettings,
   onSearch,
 }: {
+  activeItem: MobileBottomNavItem;
   canCreateMemo: boolean;
   isCreating: boolean;
   onCreateMemo: () => void;
@@ -1032,23 +1334,22 @@ const MobileBottomNav = ({
   onOpenSettings: () => void;
   onSearch: () => void;
 }) => (
-  <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-emerald-100 bg-white/95 px-5 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-10px_30px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden">
-    <div className="grid h-16 grid-cols-5 items-center">
-      <MobileBottomNavButton active icon={<Home className="h-5 w-5" />} label="首页" onClick={onHome} />
-      <MobileBottomNavButton icon={<Search className="h-5 w-5" />} label="搜索" onClick={onSearch} />
-      <div className="flex justify-center">
-        <button
-          className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-600 text-white shadow-[0_10px_22px_rgba(5,150,105,0.28)] transition hover:bg-emerald-700 disabled:opacity-50"
-          type="button"
-          title="新建笔记"
-          disabled={!canCreateMemo || isCreating}
-          onClick={onCreateMemo}
-        >
-          <Plus className="h-8 w-8" />
-        </button>
-      </div>
-      <MobileBottomNavButton icon={<Archive className="h-5 w-5" />} label="附件" onClick={onOpenAssets} />
-      <MobileBottomNavButton icon={<UserRound className="h-5 w-5" />} label="我的" onClick={onOpenSettings} />
+  <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-emerald-100 bg-white/95 px-5 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1 shadow-[0_-10px_30px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden">
+    <div className="relative grid h-16 grid-cols-5 items-center">
+      <MobileBottomNavButton active={activeItem === "home"} icon={<Home className="h-5 w-5" />} label="首页" onClick={onHome} />
+      <MobileBottomNavButton active={activeItem === "search"} icon={<Search className="h-5 w-5" />} label="搜索" onClick={onSearch} />
+      <div aria-hidden="true" />
+      <MobileBottomNavButton active={activeItem === "assets"} icon={<Archive className="h-5 w-5" />} label="附件" onClick={onOpenAssets} />
+      <MobileBottomNavButton active={activeItem === "settings"} icon={<UserRound className="h-5 w-5" />} label="我的" onClick={onOpenSettings} />
+      <button
+        className="absolute left-1/2 top-[-1.35rem] flex h-16 w-16 -translate-x-1/2 items-center justify-center rounded-full border-[6px] border-white bg-emerald-600 text-white shadow-[0_12px_26px_rgba(5,150,105,0.32)] transition hover:bg-emerald-700 disabled:opacity-50"
+        type="button"
+        title="新建笔记"
+        disabled={!canCreateMemo || isCreating}
+        onClick={onCreateMemo}
+      >
+        <Plus className="h-8 w-8" />
+      </button>
     </div>
   </nav>
 );
@@ -1077,32 +1378,149 @@ const MobileBottomNavButton = ({
   </button>
 );
 
+const MobileQuickActions = ({
+  canCreateMemo,
+  isCreating,
+  onCreateMemo,
+  onOpenAssets,
+  onOpenSettings,
+  onOpenTags,
+  onOpenTrash,
+}: {
+  canCreateMemo: boolean;
+  isCreating: boolean;
+  onCreateMemo: () => void;
+  onOpenAssets: () => void;
+  onOpenSettings: () => void;
+  onOpenTags: () => void;
+  onOpenTrash: () => void;
+}) => {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [activePage, setActivePage] = useState(0);
+  const actions = [
+    {
+      disabled: !canCreateMemo || isCreating,
+      icon: <FilePlus2 className="h-5 w-5" />,
+      label: "笔记",
+      onClick: onCreateMemo,
+    },
+    { icon: <Tags className="h-5 w-5" />, label: "标签", onClick: onOpenTags },
+    { icon: <Archive className="h-5 w-5" />, label: "附件", onClick: onOpenAssets },
+    { icon: <Trash2 className="h-5 w-5" />, label: "回收站", onClick: onOpenTrash },
+    { icon: <UserRound className="h-5 w-5" />, label: "我的", onClick: onOpenSettings },
+  ];
+  const handleScroll = () => {
+    const node = scrollRef.current;
+
+    if (!node) {
+      return;
+    }
+
+    const scrollableWidth = node.scrollWidth - node.clientWidth;
+
+    if (scrollableWidth <= 0) {
+      setActivePage(0);
+      return;
+    }
+
+    setActivePage(node.scrollLeft > scrollableWidth / 2 ? 1 : 0);
+  };
+
+  return (
+    <div className="mb-4 lg:hidden">
+      <div
+        ref={scrollRef}
+        className="-mx-1 flex snap-x snap-mandatory gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        onScroll={handleScroll}
+      >
+        {actions.map((action) => (
+          <MobileQuickActionButton
+            key={action.label}
+            disabled={action.disabled}
+            icon={action.icon}
+            label={action.label}
+            onClick={action.onClick}
+          />
+        ))}
+      </div>
+      <div className="mt-1 flex justify-center gap-1.5" aria-hidden="true">
+        <span className={cn("h-1.5 rounded-full transition-all", activePage === 0 ? "w-4 bg-emerald-500" : "w-1.5 bg-slate-300")} />
+        <span className={cn("h-1.5 rounded-full transition-all", activePage === 1 ? "w-4 bg-emerald-500" : "w-1.5 bg-slate-300")} />
+      </div>
+    </div>
+  );
+};
+
+const MobileQuickActionButton = ({
+  disabled = false,
+  icon,
+  label,
+  onClick,
+}: {
+  disabled?: boolean;
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+}) => (
+  <button
+    className="flex h-[76px] w-[92px] shrink-0 snap-start flex-col items-center justify-center gap-2 rounded-md border border-slate-100 bg-white text-xs font-medium text-slate-700 shadow-[0_8px_20px_rgba(15,23,42,0.05)] transition hover:bg-slate-50 disabled:opacity-40"
+    type="button"
+    disabled={disabled}
+    onClick={onClick}
+  >
+    <span className="text-slate-700">{icon}</span>
+    <span className="max-w-full truncate px-1">{label}</span>
+  </button>
+);
+
 const MobileNotebookPicker = ({
   notebooks,
   selectedNotebookId,
   onClose,
+  onSelectAll,
   onSelect,
 }: {
   notebooks: Notebook[];
   selectedNotebookId: string | null;
   onClose: () => void;
+  onSelectAll: () => void;
   onSelect: (notebookId: string) => void;
 }) => {
   const tree = useMemo(() => buildNotebookTree(notebooks), [notebooks]);
+  const allSelected = selectedNotebookId === null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/25 px-3 pt-[calc(4.5rem+env(safe-area-inset-top))] lg:hidden" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-slate-950/25 lg:hidden" onClick={onClose}>
       <section
-        className="max-h-[64dvh] overflow-hidden rounded-md border border-emerald-100 bg-white shadow-panel"
+        className="absolute inset-x-0 bottom-0 max-h-[76dvh] overflow-hidden rounded-t-md border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] shadow-[0_-16px_40px_rgba(15,23,42,0.16)]"
         onClick={(event) => event.stopPropagation()}
       >
-        <header className="flex h-12 items-center justify-between border-b border-emerald-100 px-4">
-          <div className="text-sm font-semibold text-slate-950">切换笔记本</div>
+        <div className="flex justify-center py-2">
+          <div className="h-1 w-10 rounded-full bg-slate-300" />
+        </div>
+        <header className="flex h-12 items-center justify-between border-b border-slate-200 px-4">
+          <div className="min-w-0">
+            <div className="text-base font-semibold text-slate-950">笔记本</div>
+            <div className="truncate text-xs text-slate-500">{allSelected ? "全部笔记" : notebooks.find((item) => item.id === selectedNotebookId)?.name}</div>
+          </div>
           <Button size="icon" variant="ghost" title="关闭" onClick={onClose}>
             <X className="h-4 w-4" />
           </Button>
         </header>
-        <div className="max-h-[calc(64dvh-3rem)] overflow-y-auto p-2">
+        <div className="max-h-[calc(76dvh_-_4.5rem_-_env(safe-area-inset-bottom))] overflow-y-auto p-2">
+          <button
+            className={cn(
+              "mb-1 flex h-12 w-full items-center gap-3 rounded-md px-3 text-left text-sm transition",
+              allSelected ? "bg-emerald-100 font-semibold text-emerald-950" : "text-slate-800 hover:bg-slate-50"
+            )}
+            type="button"
+            aria-current={allSelected ? "page" : undefined}
+            onClick={onSelectAll}
+          >
+            <LayoutList className="h-5 w-5 shrink-0 text-slate-600" />
+            <span className="min-w-0 flex-1 truncate text-base">全部笔记</span>
+            {allSelected ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" /> : null}
+          </button>
           {tree.map((node) => (
             <MobileNotebookPickerItem
               key={node.id}
@@ -1135,18 +1553,24 @@ const MobileNotebookPickerItem = ({
     <div>
       <button
         className={cn(
-          "flex h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm transition",
-          selected ? "bg-emerald-100 font-semibold text-emerald-950" : "text-slate-700 hover:bg-emerald-50"
+          "flex h-12 w-full items-center gap-3 rounded-md px-3 text-left text-sm transition",
+          selected ? "bg-emerald-100 font-semibold text-emerald-950" : "text-slate-800 hover:bg-slate-50"
         )}
         style={{ paddingLeft: `${12 + depth * 18}px` }}
         type="button"
+        aria-current={selected ? "page" : undefined}
         onClick={() => onSelect(node.id)}
       >
-        {node.slug === "inbox" ? <Inbox className="h-4 w-4 shrink-0" /> : <Folder className="h-4 w-4 shrink-0" />}
-        <span className="min-w-0 flex-1 truncate">{node.name}</span>
+        {node.slug === "inbox" ? (
+          <Inbox className="h-5 w-5 shrink-0 text-slate-600" />
+        ) : (
+          <Folder className="h-5 w-5 shrink-0 text-slate-600" />
+        )}
+        <span className="min-w-0 flex-1 truncate text-base">{node.name}</span>
+        {selected ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" /> : null}
       </button>
       {node.children.length > 0 ? (
-        <div className="mt-1">
+        <div className="mt-1 border-l border-slate-100 pl-1">
           {node.children.map((child) => (
             <MobileNotebookPickerItem
               key={child.id}
@@ -1161,6 +1585,255 @@ const MobileNotebookPickerItem = ({
     </div>
   );
 };
+
+const mobileSortOptions: Array<{ value: MemoSortMode; label: string }> = [
+  { value: "updated-desc", label: "最近更新" },
+  { value: "created-desc", label: "创建时间" },
+  { value: "title-asc", label: "标题 A-Z" },
+];
+
+const MobileListActionsSheet = ({
+  canSelectMemos,
+  sortMode,
+  onClose,
+  onEnterSelectionMode,
+  onOpenAssets,
+  onOpenSettings,
+  onOpenTags,
+  onOpenTrash,
+  onSortModeChange,
+}: {
+  canSelectMemos: boolean;
+  sortMode: MemoSortMode;
+  onClose: () => void;
+  onEnterSelectionMode: () => void;
+  onOpenAssets: () => void;
+  onOpenSettings: () => void;
+  onOpenTags: () => void;
+  onOpenTrash: () => void;
+  onSortModeChange: (value: MemoSortMode) => void;
+}) => (
+  <div className="fixed inset-0 z-50 bg-slate-950/25 px-3 pb-[calc(5.25rem+env(safe-area-inset-bottom))] lg:hidden" onClick={onClose}>
+    <section
+      className="absolute inset-x-3 bottom-[calc(5.25rem+env(safe-area-inset-bottom))] overflow-hidden rounded-md border border-slate-200 bg-white shadow-panel"
+      onClick={(event) => event.stopPropagation()}
+    >
+      <header className="flex h-12 items-center justify-between border-b border-slate-200 px-4">
+        <div className="text-sm font-semibold text-slate-950">列表选项</div>
+        <Button size="icon" variant="ghost" title="关闭" onClick={onClose}>
+          <X className="h-4 w-4" />
+        </Button>
+      </header>
+      <div className="p-2">
+        <div className="px-3 py-2 text-xs font-semibold uppercase text-slate-400">排序</div>
+        {mobileSortOptions.map((option) => (
+          <button
+            key={option.value}
+            className="flex h-11 w-full items-center gap-3 rounded-md px-3 text-left text-sm font-medium text-slate-800 transition hover:bg-slate-50"
+            type="button"
+            onClick={() => onSortModeChange(option.value)}
+          >
+            <CheckCircle2 className={cn("h-4 w-4", sortMode === option.value ? "text-emerald-600" : "text-transparent")} />
+            <span className="min-w-0 flex-1 truncate">{option.label}</span>
+          </button>
+        ))}
+
+        <div className="my-2 h-px bg-slate-100" />
+
+        <MobileListActionButton
+          disabled={!canSelectMemos}
+          icon={<CheckSquare className="h-4 w-4" />}
+          label="选择笔记"
+          onClick={onEnterSelectionMode}
+        />
+        <MobileListActionButton icon={<Tags className="h-4 w-4" />} label="标签" onClick={onOpenTags} />
+        <MobileListActionButton icon={<Archive className="h-4 w-4" />} label="附件" onClick={onOpenAssets} />
+        <MobileListActionButton icon={<Trash2 className="h-4 w-4" />} label="回收站" onClick={onOpenTrash} />
+        <MobileListActionButton icon={<UserRound className="h-4 w-4" />} label="我的" onClick={onOpenSettings} />
+      </div>
+    </section>
+  </div>
+);
+
+const MobileListActionButton = ({
+  disabled = false,
+  icon,
+  label,
+  onClick,
+}: {
+  disabled?: boolean;
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+}) => (
+  <button
+    className="flex h-11 w-full items-center gap-3 rounded-md px-3 text-left text-sm font-medium text-slate-800 transition hover:bg-slate-50 disabled:opacity-40"
+    type="button"
+    disabled={disabled}
+    onClick={onClick}
+  >
+    <span className="text-slate-500">{icon}</span>
+    <span className="min-w-0 flex-1 truncate">{label}</span>
+  </button>
+);
+
+const MobileSelectionActionBar = ({
+  canMove,
+  isDeleting,
+  isTrashView,
+  onDelete,
+  onOpenMore,
+  onOpenMove,
+}: {
+  canMove: boolean;
+  isDeleting: boolean;
+  isTrashView: boolean;
+  onDelete: () => void;
+  onOpenMore: () => void;
+  onOpenMove: () => void;
+}) => (
+  <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-8 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-10px_30px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden">
+    <div className="grid h-14 grid-cols-3 items-center">
+      <MobileSelectionActionButton
+        disabled={!canMove}
+        icon={<Folder className="h-5 w-5" />}
+        label="移动"
+        onClick={onOpenMove}
+      />
+      <MobileSelectionActionButton
+        disabled={isDeleting}
+        icon={<Trash2 className="h-5 w-5" />}
+        label={isTrashView ? "永久删除" : "删除"}
+        onClick={onDelete}
+      />
+      <MobileSelectionActionButton icon={<MoreHorizontal className="h-5 w-5" />} label="更多" onClick={onOpenMore} />
+    </div>
+  </nav>
+);
+
+const MobileSelectionActionButton = ({
+  disabled = false,
+  icon,
+  label,
+  onClick,
+}: {
+  disabled?: boolean;
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+}) => (
+  <button
+    className="flex h-12 flex-col items-center justify-center gap-1 rounded-md text-xs font-medium text-slate-700 transition hover:bg-slate-100 disabled:opacity-40"
+    type="button"
+    disabled={disabled}
+    onClick={onClick}
+  >
+    {icon}
+    <span>{label}</span>
+  </button>
+);
+
+const MobileMoveSheet = ({
+  isMoving,
+  notebooks,
+  selectedNotebookId,
+  onClose,
+  onMove,
+}: {
+  isMoving: boolean;
+  notebooks: Notebook[];
+  selectedNotebookId: string;
+  onClose: () => void;
+  onMove: (notebookId: string) => void;
+}) => {
+  const options = useMemo(() => getNotebookMoveOptions(notebooks), [notebooks]);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-950/25 px-3 pb-[calc(5.25rem+env(safe-area-inset-bottom))] lg:hidden" onClick={onClose}>
+      <section
+        className="absolute inset-x-3 bottom-[calc(5.25rem+env(safe-area-inset-bottom))] max-h-[52dvh] overflow-hidden rounded-md border border-slate-200 bg-white shadow-panel"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="flex h-12 items-center justify-between border-b border-slate-200 px-4">
+          <div className="text-sm font-semibold text-slate-950">移动到笔记本</div>
+          <Button size="icon" variant="ghost" title="关闭" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </header>
+        <div className="max-h-[calc(52dvh-3rem)] overflow-y-auto p-2">
+          {options.map((option) => (
+            <button
+              key={option.id}
+              className={cn(
+                "flex h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm transition",
+                option.id === selectedNotebookId ? "bg-emerald-100 font-semibold text-emerald-950" : "text-slate-700 hover:bg-slate-50"
+              )}
+              style={{ paddingLeft: `${12 + option.depth * 18}px` }}
+              type="button"
+              disabled={isMoving}
+              onClick={() => onMove(option.id)}
+            >
+              {option.slug === "inbox" ? <Inbox className="h-4 w-4 shrink-0" /> : <Folder className="h-4 w-4 shrink-0" />}
+              <span className="min-w-0 flex-1 truncate">{option.name}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+};
+
+const MobileSelectionMoreSheet = ({
+  canMerge,
+  canToggleVisibleSelection,
+  selectionToggleLabel,
+  onClearSelection,
+  onClose,
+  onMerge,
+  onToggleVisibleSelection,
+}: {
+  canMerge: boolean;
+  canToggleVisibleSelection: boolean;
+  selectionToggleLabel: string;
+  onClearSelection: () => void;
+  onClose: () => void;
+  onMerge: () => void;
+  onToggleVisibleSelection: () => void;
+}) => (
+  <div className="fixed inset-0 z-50 bg-slate-950/25 px-3 pb-[calc(5.25rem+env(safe-area-inset-bottom))] lg:hidden" onClick={onClose}>
+    <section
+      className="absolute inset-x-3 bottom-[calc(5.25rem+env(safe-area-inset-bottom))] overflow-hidden rounded-md border border-slate-200 bg-white shadow-panel"
+      onClick={(event) => event.stopPropagation()}
+    >
+      <button
+        className="flex h-12 w-full items-center gap-3 border-b border-slate-100 px-4 text-left text-sm font-medium text-slate-800 transition hover:bg-slate-50 disabled:opacity-40"
+        type="button"
+        disabled={!canToggleVisibleSelection}
+        onClick={onToggleVisibleSelection}
+      >
+        <CheckSquare className="h-4 w-4" />
+        {selectionToggleLabel}
+      </button>
+      <button
+        className="flex h-12 w-full items-center gap-3 border-b border-slate-100 px-4 text-left text-sm font-medium text-slate-800 transition hover:bg-slate-50 disabled:opacity-40"
+        type="button"
+        disabled={!canMerge}
+        onClick={onMerge}
+      >
+        <Merge className="h-4 w-4" />
+        合并笔记
+      </button>
+      <button
+        className="flex h-12 w-full items-center gap-3 px-4 text-left text-sm font-medium text-slate-800 transition hover:bg-slate-50"
+        type="button"
+        onClick={onClearSelection}
+      >
+        <X className="h-4 w-4" />
+        取消选择
+      </button>
+    </section>
+  </div>
+);
 
 const NotebookTreeItem = ({
   node,
@@ -1312,19 +1985,33 @@ const MemoListPane = ({
   memos,
   selectedMemoId,
   selectedMemoIds,
+  selectionMode,
   search,
   searchFocusToken,
+  canCreateMemo,
   isLoading,
   isCreating,
   isMerging,
   isMoving,
+  isDeleting,
   multiSelectKeyDown,
   onOpenNotebookPicker,
   onSearch,
   onCreateMemo,
+  onClearSelection,
+  onEnterSelectionMode,
+  onReplaceSelection,
+  onOpenAssets,
   onOpenMemo,
   onToggleMemo,
+  onOpenSettings,
+  onOpenTags,
+  onOpenTrash,
   onMerge,
+  onDeleteMemo,
+  onRestoreMemo,
+  onMoveMemo,
+  onDeleteSelectedMemos,
   onMoveSelectedMemos,
 }: {
   notebook: Notebook | null;
@@ -1333,30 +2020,80 @@ const MemoListPane = ({
   memos: MemoSummary[];
   selectedMemoId: string | null;
   selectedMemoIds: Set<string>;
+  selectionMode: boolean;
   search: string;
   searchFocusToken: number;
+  canCreateMemo: boolean;
   isLoading: boolean;
   isCreating: boolean;
   isMerging: boolean;
   isMoving: boolean;
+  isDeleting: boolean;
   multiSelectKeyDown: boolean;
   onOpenNotebookPicker: () => void;
   onSearch: (value: string) => void;
   onCreateMemo: () => void;
+  onClearSelection: () => void;
+  onEnterSelectionMode: () => void;
+  onReplaceSelection: (memoIds: string[]) => void;
+  onOpenAssets: () => void;
   onOpenMemo: (memoId: string) => void;
-  onToggleMemo: (memoId: string) => void;
+  onToggleMemo: (memoId: string, rangeMemoIds?: string[]) => void;
+  onOpenSettings: () => void;
+  onOpenTags: () => void;
+  onOpenTrash: () => void;
   onMerge: () => void;
+  onDeleteMemo: (memoId: string) => void;
+  onRestoreMemo: (memoId: string) => void;
+  onMoveMemo: (memoId: string, targetNotebookId: string) => void;
+  onDeleteSelectedMemos: () => void;
   onMoveSelectedMemos: (notebookId: string) => void;
 }) => {
   const [moveTargetNotebookId, setMoveTargetNotebookId] = useState(notebook?.id ?? notebooks[0]?.id ?? "");
-  const memoGroups = useMemo(() => groupMemosByMonth(memos), [memos]);
+  const [desktopActionsOpen, setDesktopActionsOpen] = useState(false);
+  const [mobileListActionsOpen, setMobileListActionsOpen] = useState(false);
+  const [mobileMoveOpen, setMobileMoveOpen] = useState(false);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const [memoContextMenu, setMemoContextMenu] = useState<MemoContextMenuState | null>(null);
+  const [contextMoveOpen, setContextMoveOpen] = useState(false);
+  const [filterMode, setFilterMode] = useState<MemoFilterMode>("all");
+  const [sortMode, setSortMode] = useState<MemoSortMode>("updated-desc");
+  const [listDensity, setListDensity] = useState<MemoListDensity>("preview");
+  const [lastSelectedMemoId, setLastSelectedMemoId] = useState<string | null>(null);
+  const filterOptions = useMemo(() => getMemoFilterOptions(memos), [memos]);
+  const filteredMemos = useMemo(() => filterMemos(memos, filterMode), [filterMode, memos]);
+  const sortedMemos = useMemo(() => sortMemos(filteredMemos, sortMode), [filteredMemos, sortMode]);
+  const visibleMemoIds = useMemo(() => sortedMemos.map((memo) => memo.id), [sortedMemos]);
+  const memoGroups = useMemo(() => groupMemos(sortedMemos, sortMode), [sortedMemos, sortMode]);
+  const moveNotebookOptions = useMemo(() => getNotebookMoveOptions(notebooks), [notebooks]);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const listScrollRef = useRef<HTMLDivElement | null>(null);
+  const canEnterSelectionMode = visibleMemoIds.length > 0;
+  const selectedVisibleMemoCount = visibleMemoIds.filter((memoId) => selectedMemoIds.has(memoId)).length;
+  const allVisibleMemosSelected = visibleMemoIds.length > 0 && selectedVisibleMemoCount === visibleMemoIds.length;
+  const canSelectAllVisibleMemos = visibleMemoIds.some((memoId) => !selectedMemoIds.has(memoId));
+  const canToggleVisibleMemoSelection = visibleMemoIds.length > 0;
+  const visibleSelectionToggleLabel = allVisibleMemosSelected ? "全不选当前列表" : "全选当前列表";
+  const desktopActionsRef = useDismissableLayer<HTMLDivElement>(desktopActionsOpen, () => setDesktopActionsOpen(false));
+  const memoContextMenuRef = useDismissableLayer<HTMLDivElement>(Boolean(memoContextMenu), () => setMemoContextMenu(null));
+  const listTitle = view === "trash" ? "回收站" : notebook?.name ?? "全部笔记";
+  const listContextLabel = view === "trash" ? "已删除笔记" : notebook ? "当前笔记本" : "所有笔记本";
+  const listCountLabel = `${filteredMemos.length}${filterMode !== "all" ? ` / ${memos.length}` : ""} ${
+    view === "trash" ? "条已删除" : "条笔记"
+  }`;
+  const hasListConstraint = Boolean(search.trim()) || filterMode !== "all";
+  const activeFilterLabel = filterOptions.find((option) => option.value === filterMode)?.label ?? "全部";
 
   useEffect(() => {
     if (notebook?.id) {
       setMoveTargetNotebookId(notebook.id);
+      return;
     }
-  }, [notebook?.id]);
+
+    if (!moveTargetNotebookId && moveNotebookOptions[0]?.id) {
+      setMoveTargetNotebookId(moveNotebookOptions[0].id);
+    }
+  }, [moveNotebookOptions, moveTargetNotebookId, notebook?.id]);
 
   useEffect(() => {
     if (searchFocusToken === 0) {
@@ -1366,9 +2103,212 @@ const MemoListPane = ({
     searchInputRef.current?.focus();
   }, [searchFocusToken]);
 
+  useEffect(() => {
+    if (!filterOptions.some((option) => option.value === filterMode)) {
+      setFilterMode("all");
+    }
+  }, [filterMode, filterOptions]);
+
+  useEffect(() => {
+    if (!selectedMemoId || !visibleMemoIds.includes(selectedMemoId) || !window.matchMedia("(min-width: 1024px)").matches) {
+      return;
+    }
+
+    const scrollContainer = listScrollRef.current;
+
+    if (!scrollContainer) {
+      return;
+    }
+
+    const escapedMemoId = CSS.escape(selectedMemoId);
+    const selectedNode = scrollContainer.querySelector<HTMLElement>(`[data-memo-id="${escapedMemoId}"]`);
+
+    if (!selectedNode) {
+      return;
+    }
+
+    const containerRect = scrollContainer.getBoundingClientRect();
+    const selectedRect = selectedNode.getBoundingClientRect();
+    const stickyHeaderOffset = 40;
+
+    if (selectedRect.top < containerRect.top + stickyHeaderOffset) {
+      scrollContainer.scrollTop -= containerRect.top + stickyHeaderOffset - selectedRect.top;
+      return;
+    }
+
+    if (selectedRect.bottom > containerRect.bottom) {
+      scrollContainer.scrollTop += selectedRect.bottom - containerRect.bottom;
+    }
+  }, [selectedMemoId, visibleMemoIds]);
+
+  const handleToggleMemo = (memoId: string, event?: MouseEvent<HTMLElement>) => {
+    const currentIndex = visibleMemoIds.indexOf(memoId);
+    const anchorIndex = lastSelectedMemoId ? visibleMemoIds.indexOf(lastSelectedMemoId) : -1;
+
+    if (event?.shiftKey && currentIndex >= 0 && anchorIndex >= 0) {
+      const start = Math.min(currentIndex, anchorIndex);
+      const end = Math.max(currentIndex, anchorIndex);
+      onToggleMemo(memoId, visibleMemoIds.slice(start, end + 1));
+    } else {
+      onToggleMemo(memoId);
+    }
+
+    setLastSelectedMemoId(memoId);
+  };
+
+  const handleSelectAllVisibleMemos = () => {
+    if (visibleMemoIds.length === 0) {
+      return;
+    }
+
+    onReplaceSelection(visibleMemoIds);
+    setLastSelectedMemoId(visibleMemoIds.at(-1) ?? visibleMemoIds[0]);
+  };
+
+  const handleClearVisibleMemos = () => {
+    const nextSelectedMemoIds = Array.from(selectedMemoIds).filter((memoId) => !visibleMemoIds.includes(memoId));
+
+    onReplaceSelection(nextSelectedMemoIds);
+    setLastSelectedMemoId(null);
+  };
+
+  const handleOpenMemoContextMenu = (memo: MemoSummary, event: MouseEvent<HTMLElement>) => {
+    const menuWidth = 224;
+    const menuHeight = view === "trash" ? 160 : 260;
+    const x = Math.min(event.clientX, Math.max(12, window.innerWidth - menuWidth - 12));
+    const y = Math.min(event.clientY, Math.max(12, window.innerHeight - menuHeight - 12));
+
+    setContextMoveOpen(false);
+    setMemoContextMenu({ memo, x, y });
+  };
+
+  const handleClearSearch = () => {
+    onSearch("");
+    searchInputRef.current?.focus();
+  };
+
+  const handleResetListConstraints = () => {
+    setFilterMode("all");
+    onSearch("");
+    searchInputRef.current?.focus();
+  };
+
+  const handleListKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!window.matchMedia("(min-width: 1024px)").matches) {
+      return;
+    }
+
+    const target = event.target instanceof HTMLElement ? event.target : null;
+
+    if (target?.closest("input, textarea, select, [contenteditable='true']")) {
+      return;
+    }
+
+    if (!event.altKey && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+      if (visibleMemoIds.length === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      setMemoContextMenu(null);
+      handleSelectAllVisibleMemos();
+      return;
+    }
+
+    if (event.altKey || event.ctrlKey || event.metaKey) {
+      return;
+    }
+
+    const currentIndex = selectedMemoId ? visibleMemoIds.indexOf(selectedMemoId) : -1;
+
+    if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
+      if (visibleMemoIds.length === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      setMemoContextMenu(null);
+
+      const nextIndex =
+        event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? visibleMemoIds.length - 1
+            : event.key === "ArrowDown"
+              ? Math.min(currentIndex < 0 ? 0 : currentIndex + 1, visibleMemoIds.length - 1)
+              : Math.max(currentIndex < 0 ? 0 : currentIndex - 1, 0);
+      const nextMemoId = visibleMemoIds[nextIndex];
+
+      onOpenMemo(nextMemoId);
+      setLastSelectedMemoId(nextMemoId);
+      return;
+    }
+
+    if (event.key === "Enter") {
+      if (!selectedMemoId || !visibleMemoIds.includes(selectedMemoId)) {
+        return;
+      }
+
+      event.preventDefault();
+      setMemoContextMenu(null);
+      onOpenMemo(selectedMemoId);
+      return;
+    }
+
+    if (event.key === "Delete" || event.key === "Backspace") {
+      if (selectionMode && selectedMemoIds.size > 0) {
+        event.preventDefault();
+        setMemoContextMenu(null);
+        onDeleteSelectedMemos();
+        return;
+      }
+
+      if (!selectedMemoId || !visibleMemoIds.includes(selectedMemoId)) {
+        return;
+      }
+
+      event.preventDefault();
+      setMemoContextMenu(null);
+      onDeleteMemo(selectedMemoId);
+    }
+  };
+
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col outline-none" tabIndex={0} onKeyDown={handleListKeyDown}>
       <header className="border-b border-emerald-100 bg-white px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] lg:py-3">
+        {selectionMode ? (
+          <div className="mb-3 flex h-10 items-center justify-between gap-3 lg:hidden">
+            <div className="flex min-w-0 items-center gap-3">
+              <button
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                type="button"
+                title="取消选择"
+                aria-label="取消选择"
+                onClick={onClearSelection}
+              >
+                <X className="h-5 w-5" />
+              </button>
+              <div className="min-w-0 truncate text-lg font-semibold text-slate-900">已选择{selectedMemoIds.size}条</div>
+            </div>
+            <button
+              className="shrink-0 text-sm font-semibold text-emerald-700 disabled:text-slate-300"
+              type="button"
+              disabled={visibleMemoIds.length === 0}
+              onClick={allVisibleMemosSelected ? handleClearVisibleMemos : handleSelectAllVisibleMemos}
+            >
+              {allVisibleMemosSelected ? "全不选" : "全选"}
+            </button>
+          </div>
+        ) : null}
+        <MobileQuickActions
+          canCreateMemo={canCreateMemo && !selectionMode}
+          isCreating={isCreating}
+          onCreateMemo={onCreateMemo}
+          onOpenAssets={onOpenAssets}
+          onOpenSettings={onOpenSettings}
+          onOpenTags={onOpenTags}
+          onOpenTrash={onOpenTrash}
+        />
         <div className="mb-3 flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
             <button
@@ -1377,51 +2317,229 @@ const MemoListPane = ({
               title="切换笔记本"
               onClick={onOpenNotebookPicker}
             >
-              <span className="max-w-[190px] truncate text-lg font-semibold text-slate-950">
-                {view === "trash" ? "回收站" : notebook?.name ?? "全部笔记"}
-              </span>
+              <span className="max-w-[190px] truncate text-lg font-semibold text-slate-950">{listTitle}</span>
               <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
             </button>
             <div className="min-w-0">
-              <div className="hidden truncate text-lg font-semibold text-slate-950 lg:block lg:text-sm">
-                {view === "trash" ? "回收站" : notebook?.name ?? "全部笔记"}
-              </div>
+              <div className="hidden truncate text-lg font-semibold text-slate-950 lg:block lg:text-sm">{listTitle}</div>
               <div className="text-xs text-slate-500">
-                {memos.length} {view === "trash" ? "条已删除" : "条笔记"}
+                <span className="hidden lg:inline">{listContextLabel} · </span>
+                {listCountLabel}
               </div>
             </div>
           </div>
           <Button
-            className="hidden lg:inline-flex"
+            className="lg:hidden"
             size="icon"
-            variant="solid"
-            title="新建笔记"
-            onClick={onCreateMemo}
-            disabled={!notebook || isCreating || view === "trash"}
+            variant="ghost"
+            title="更多"
+            onClick={() => setMobileListActionsOpen(true)}
           >
-            <FilePlus2 className="h-4 w-4" />
+            <MoreHorizontal className="h-5 w-5" />
           </Button>
+          <div className="hidden shrink-0 items-center gap-1 lg:flex">
+            <select
+              className="h-8 rounded-md border border-emerald-100 bg-white px-2 text-xs font-medium text-slate-700 outline-none"
+              value={filterMode}
+              onChange={(event) => setFilterMode(event.target.value as MemoFilterMode)}
+              title="筛选"
+            >
+              {filterOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <select
+              className="h-8 rounded-md border border-emerald-100 bg-white px-2 text-xs font-medium text-slate-700 outline-none"
+              value={sortMode}
+              onChange={(event) => setSortMode(event.target.value as MemoSortMode)}
+              title="排序"
+            >
+              <option value="updated-desc">最近更新</option>
+              <option value="created-desc">创建时间</option>
+              <option value="title-asc">标题 A-Z</option>
+            </select>
+            <div className="flex h-8 overflow-hidden rounded-md border border-emerald-100 bg-white">
+              <button
+                className={cn(
+                  "flex h-8 w-8 items-center justify-center transition",
+                  listDensity === "preview" ? "bg-emerald-100 text-emerald-950" : "text-slate-500 hover:bg-emerald-50"
+                )}
+                type="button"
+                title="预览列表"
+                onClick={() => setListDensity("preview")}
+              >
+                <LayoutList className="h-4 w-4" />
+              </button>
+              <button
+                className={cn(
+                  "flex h-8 w-8 items-center justify-center border-l border-emerald-100 transition",
+                  listDensity === "compact" ? "bg-emerald-100 text-emerald-950" : "text-slate-500 hover:bg-emerald-50"
+                )}
+                type="button"
+                title="紧凑列表"
+                onClick={() => setListDensity("compact")}
+              >
+                <List className="h-4 w-4" />
+              </button>
+            </div>
+            <Button
+              size="icon"
+              variant="solid"
+              title="新建笔记"
+              onClick={onCreateMemo}
+              disabled={!canCreateMemo || isCreating || view === "trash"}
+            >
+              <FilePlus2 className="h-4 w-4" />
+            </Button>
+            <div className="relative" ref={desktopActionsRef}>
+              <Button
+                size="icon"
+                variant="ghost"
+                title="更多"
+                onClick={() => setDesktopActionsOpen((value) => !value)}
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+              {desktopActionsOpen ? (
+                <div className="absolute right-0 top-9 z-30 w-40 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-panel">
+                  <button
+                    className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                    type="button"
+                    onClick={() => {
+                      setDesktopActionsOpen(false);
+                      onOpenTags();
+                    }}
+                  >
+                    <Tags className="h-4 w-4" />
+                    标签
+                  </button>
+                  <button
+                    className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                    type="button"
+                    onClick={() => {
+                      setDesktopActionsOpen(false);
+                      onOpenAssets();
+                    }}
+                  >
+                    <Archive className="h-4 w-4" />
+                    附件
+                  </button>
+                  <button
+                    className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                    type="button"
+                    onClick={() => {
+                      setDesktopActionsOpen(false);
+                      onOpenTrash();
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    回收站
+                  </button>
+                  <button
+                    className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                    type="button"
+                    onClick={() => {
+                      setDesktopActionsOpen(false);
+                      onOpenSettings();
+                    }}
+                  >
+                    <UserRound className="h-4 w-4" />
+                    我的
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
         </div>
-        <label className="flex h-9 items-center gap-2 rounded-md border border-emerald-100 bg-emerald-50/70 px-3 text-sm text-slate-500">
-          <Search className="h-4 w-4" />
-          <input
-            ref={searchInputRef}
-            value={search}
-            onChange={(event) => onSearch(event.target.value)}
-            className="min-w-0 flex-1 bg-transparent text-slate-900 outline-none placeholder:text-slate-400"
-            placeholder="搜索笔记"
-          />
-        </label>
+        <div className="flex items-center gap-2">
+          <div className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-emerald-100 bg-emerald-50/70 px-3 text-sm text-slate-500">
+            <Search className="h-4 w-4" />
+            <input
+              ref={searchInputRef}
+              value={search}
+              onChange={(event) => onSearch(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && search) {
+                  event.preventDefault();
+                  handleClearSearch();
+                }
+              }}
+              className="min-w-0 flex-1 bg-transparent text-slate-900 outline-none placeholder:text-slate-400"
+              placeholder="搜索笔记"
+            />
+            {search ? (
+              <button
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-white hover:text-slate-700"
+                type="button"
+                title="清空搜索"
+                aria-label="清空搜索"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={handleClearSearch}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
+          </div>
+          <div className="flex shrink-0 items-center gap-2 lg:hidden">
+            {filterOptions.map((option) => (
+              <button
+                key={option.value}
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-full border transition",
+                  filterMode === option.value
+                    ? "border-emerald-600 bg-emerald-600 text-white shadow-[0_8px_18px_rgba(5,150,105,0.22)]"
+                    : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                )}
+                type="button"
+                title={option.label}
+                aria-label={option.label}
+                aria-pressed={filterMode === option.value}
+                onClick={() => setFilterMode(option.value)}
+              >
+                {getMobileFilterIcon(option.value)}
+              </button>
+            ))}
+          </div>
+        </div>
+        {hasListConstraint ? (
+          <div className="mt-3 flex min-h-8 items-center gap-2 rounded-md border border-emerald-100 bg-white px-3 py-1.5 text-xs text-slate-500">
+            <span className="min-w-0 flex-1 truncate">
+              {search.trim() ? `搜索「${search.trim()}」` : `筛选：${activeFilterLabel}`} · {filteredMemos.length} 条
+            </span>
+            <button
+              className="shrink-0 font-semibold text-emerald-700 transition hover:text-emerald-900"
+              type="button"
+              onClick={handleResetListConstraints}
+            >
+              重置
+            </button>
+          </div>
+        ) : null}
       </header>
 
-      <div className="relative min-h-0 flex-1 overflow-y-auto p-3 pb-[calc(5.75rem+env(safe-area-inset-bottom))] lg:pb-3">
-        {selectedMemoIds.size > 0 ? (
-          <div className="sticky top-0 z-10 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-emerald-100 bg-white px-3 py-2 shadow-panel">
+      <div ref={listScrollRef} className="relative min-h-0 flex-1 overflow-y-auto p-3 pb-[calc(7rem+env(safe-area-inset-bottom))] lg:pb-3">
+        {selectionMode ? (
+          <div className="sticky top-0 z-10 mb-3 hidden flex-wrap items-center justify-between gap-2 rounded-md border border-emerald-100 bg-white px-3 py-2 shadow-panel lg:flex">
             <div className="flex items-center gap-2 text-sm font-medium">
               <CheckSquare className="h-4 w-4 text-emerald-700" />
-              {selectedMemoIds.size} selected
+              {selectedMemoIds.size} 已选择
             </div>
             <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={allVisibleMemosSelected ? handleClearVisibleMemos : handleSelectAllVisibleMemos}
+                disabled={!canToggleVisibleMemoSelection}
+              >
+                <CheckSquare className="h-4 w-4" />
+                {allVisibleMemosSelected ? "全不选" : "全选"}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={onClearSelection}>
+                <X className="h-4 w-4" />
+                取消
+              </Button>
               <select
                 className="h-8 max-w-40 rounded-md border border-emerald-100 bg-emerald-50/70 px-2 text-xs text-emerald-900 outline-none disabled:opacity-50"
                 value={moveTargetNotebookId}
@@ -1429,9 +2547,9 @@ const MemoListPane = ({
                 onChange={(event) => setMoveTargetNotebookId(event.target.value)}
                 title="移动到笔记本"
               >
-                {notebooks.map((item) => (
+                {moveNotebookOptions.map((item) => (
                   <option key={item.id} value={item.id}>
-                    {item.name}
+                    {item.selectLabel}
                   </option>
                 ))}
               </select>
@@ -1439,7 +2557,7 @@ const MemoListPane = ({
                 size="sm"
                 variant="soft"
                 onClick={() => onMoveSelectedMemos(moveTargetNotebookId)}
-                disabled={!moveTargetNotebookId || isMoving || view === "trash"}
+                disabled={selectedMemoIds.size === 0 || !moveTargetNotebookId || isMoving || view === "trash"}
               >
                 <Folder className="h-4 w-4" />
                 移动
@@ -1453,34 +2571,64 @@ const MemoListPane = ({
                 <Merge className="h-4 w-4" />
                 合并
               </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                onClick={onDeleteSelectedMemos}
+                disabled={selectedMemoIds.size === 0 || isDeleting}
+              >
+                <Trash2 className="h-4 w-4" />
+                {view === "trash" ? "永久删除" : "删除"}
+              </Button>
             </div>
           </div>
         ) : null}
 
         {isLoading ? (
           <div className="px-2 py-4 text-sm text-slate-500">加载中</div>
-        ) : memos.length === 0 ? (
-          <div className="rounded-md border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-sm text-slate-500">
-            {view === "trash" ? "回收站为空" : "暂无笔记"}
+        ) : filteredMemos.length === 0 ? (
+          <div className="rounded-md border border-dashed border-slate-300 bg-white px-4 py-9 text-center">
+            <div className="text-sm font-semibold text-slate-800">
+              {memos.length === 0 ? (view === "trash" ? "回收站为空" : "暂无笔记") : "没有符合筛选的笔记"}
+            </div>
+            <div className="mx-auto mt-2 max-w-[260px] text-xs leading-5 text-slate-500">
+              {memos.length === 0
+                ? view === "trash"
+                  ? "删除的笔记会显示在这里。"
+                  : "先创建一条笔记，之后可以在这里快速预览、搜索和批量整理。"
+                : "试试切换筛选条件，或调整搜索关键词。"}
+            </div>
+            {memos.length === 0 && canCreateMemo && view !== "trash" ? (
+              <Button className="mt-4 justify-center" size="sm" variant="solid" onClick={onCreateMemo} disabled={isCreating}>
+                <FilePlus2 className="h-4 w-4" />
+                新建笔记
+              </Button>
+            ) : null}
           </div>
         ) : (
-          <div className="overflow-hidden rounded-sm border-y border-slate-200 bg-white">
+          <div className="space-y-4 lg:space-y-0 lg:overflow-hidden lg:rounded-sm lg:border-y lg:border-slate-200 lg:bg-white">
             {memoGroups.map((group) => (
               <section key={group.key}>
-                <div className="sticky top-0 z-[4] flex h-9 items-center justify-between border-b border-slate-200 bg-white/95 px-4 text-sm font-semibold text-slate-500 backdrop-blur">
+                <div className="sticky top-0 z-[4] flex h-9 items-center justify-between bg-emerald-50/95 px-1 text-sm font-semibold text-slate-500 backdrop-blur lg:border-b lg:border-slate-200 lg:bg-white/95 lg:px-4">
                   <span>{group.label}</span>
                   <span>{group.items.length}</span>
                 </div>
-                <div>
+                <div className="space-y-3 lg:space-y-0">
                   {group.items.map((memo) => (
                     <MemoCard
                       key={memo.id}
                       memo={memo}
                       selected={memo.id === selectedMemoId}
                       checked={selectedMemoIds.has(memo.id)}
+                      isTrashView={view === "trash"}
+                      selectionMode={selectionMode}
+                      listDensity={listDensity}
                       multiSelectKeyDown={multiSelectKeyDown}
                       onOpen={() => onOpenMemo(memo.id)}
-                      onToggle={() => onToggleMemo(memo.id)}
+                      onDelete={() => onDeleteMemo(memo.id)}
+                      onRestore={() => onRestoreMemo(memo.id)}
+                      onOpenContextMenu={(event) => handleOpenMemoContextMenu(memo, event)}
+                      onToggle={(event) => handleToggleMemo(memo.id, event)}
                     />
                   ))}
                 </div>
@@ -1489,15 +2637,278 @@ const MemoListPane = ({
           </div>
         )}
       </div>
+      {memoContextMenu ? (
+        <div
+          ref={memoContextMenuRef}
+          className="fixed z-50 hidden w-56 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-panel lg:block"
+          style={{ left: memoContextMenu.x, top: memoContextMenu.y }}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button
+            className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+            type="button"
+            onClick={() => {
+              const { memo } = memoContextMenu;
+              setMemoContextMenu(null);
+              onOpenMemo(memo.id);
+            }}
+          >
+            <FileIcon className="h-4 w-4" />
+            打开笔记
+          </button>
+          <button
+            className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+            type="button"
+            onClick={() => {
+              const { memo } = memoContextMenu;
+              setMemoContextMenu(null);
+              handleToggleMemo(memo.id);
+            }}
+          >
+            <CheckSquare className="h-4 w-4" />
+            选择笔记
+          </button>
+          <div className="my-1 h-px bg-slate-100" />
+          {view === "trash" ? (
+            <>
+              <button
+                className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                type="button"
+                onClick={() => {
+                  const { memo } = memoContextMenu;
+                  setMemoContextMenu(null);
+                  onRestoreMemo(memo.id);
+                }}
+              >
+                <RotateCcw className="h-4 w-4" />
+                恢复笔记
+              </button>
+              <button
+                className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-rose-700 transition hover:bg-rose-50"
+                type="button"
+                onClick={() => {
+                  const { memo } = memoContextMenu;
+                  setMemoContextMenu(null);
+                  onDeleteMemo(memo.id);
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+                永久删除
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
+                type="button"
+                disabled={moveNotebookOptions.length === 0}
+                onClick={() => setContextMoveOpen((value) => !value)}
+              >
+                <Folder className="h-4 w-4" />
+                <span className="min-w-0 flex-1 truncate">移动到笔记本</span>
+                <ChevronRight className={cn("h-4 w-4 transition", contextMoveOpen && "rotate-90")} />
+              </button>
+              {contextMoveOpen ? (
+                <div className="max-h-52 overflow-y-auto border-y border-slate-100 bg-slate-50/60 py-1">
+                  {moveNotebookOptions.map((option) => (
+                    <button
+                      key={option.id}
+                      className={cn(
+                        "flex h-9 w-full items-center gap-2 px-3 text-left text-sm transition hover:bg-white",
+                        option.id === memoContextMenu.memo.notebookId ? "font-semibold text-emerald-700" : "text-slate-700"
+                      )}
+                      style={{ paddingLeft: `${12 + option.depth * 14}px` }}
+                      type="button"
+                      disabled={option.id === memoContextMenu.memo.notebookId}
+                      onClick={() => {
+                        const { memo } = memoContextMenu;
+                        setContextMoveOpen(false);
+                        setMemoContextMenu(null);
+                        onMoveMemo(memo.id, option.id);
+                      }}
+                    >
+                      {option.slug === "inbox" ? <Inbox className="h-4 w-4 shrink-0" /> : <Folder className="h-4 w-4 shrink-0" />}
+                      <span className="min-w-0 flex-1 truncate">{option.name}</span>
+                      {option.id === memoContextMenu.memo.notebookId ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : null}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <button
+                className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-rose-700 transition hover:bg-rose-50"
+                type="button"
+                onClick={() => {
+                  const { memo } = memoContextMenu;
+                  setMemoContextMenu(null);
+                  onDeleteMemo(memo.id);
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+                删除笔记
+              </button>
+            </>
+          )}
+        </div>
+      ) : null}
+      {selectionMode ? (
+        <MobileSelectionActionBar
+          canMove={selectedMemoIds.size > 0 && view !== "trash" && notebooks.length > 0 && !isMoving}
+          isDeleting={selectedMemoIds.size === 0 || isDeleting}
+          isTrashView={view === "trash"}
+          onDelete={onDeleteSelectedMemos}
+          onOpenMore={() => setMobileMoreOpen(true)}
+          onOpenMove={() => setMobileMoveOpen(true)}
+        />
+      ) : null}
+      {mobileListActionsOpen ? (
+        <MobileListActionsSheet
+          canSelectMemos={canEnterSelectionMode}
+          sortMode={sortMode}
+          onClose={() => setMobileListActionsOpen(false)}
+          onEnterSelectionMode={() => {
+            setMobileListActionsOpen(false);
+            onEnterSelectionMode();
+          }}
+          onOpenAssets={() => {
+            setMobileListActionsOpen(false);
+            onOpenAssets();
+          }}
+          onOpenSettings={() => {
+            setMobileListActionsOpen(false);
+            onOpenSettings();
+          }}
+          onOpenTags={() => {
+            setMobileListActionsOpen(false);
+            onOpenTags();
+          }}
+          onOpenTrash={() => {
+            setMobileListActionsOpen(false);
+            onOpenTrash();
+          }}
+          onSortModeChange={(value) => {
+            setSortMode(value);
+            setMobileListActionsOpen(false);
+          }}
+        />
+      ) : null}
+      {mobileMoveOpen ? (
+        <MobileMoveSheet
+          isMoving={isMoving}
+          notebooks={notebooks}
+          selectedNotebookId={moveTargetNotebookId}
+          onClose={() => setMobileMoveOpen(false)}
+          onMove={(notebookId) => {
+            setMoveTargetNotebookId(notebookId);
+            onMoveSelectedMemos(notebookId);
+            setMobileMoveOpen(false);
+          }}
+        />
+      ) : null}
+      {mobileMoreOpen ? (
+        <MobileSelectionMoreSheet
+          canMerge={selectedMemoIds.size >= 2 && view !== "trash" && !isMerging}
+          canToggleVisibleSelection={canToggleVisibleMemoSelection}
+          selectionToggleLabel={visibleSelectionToggleLabel}
+          onToggleVisibleSelection={() => {
+            setMobileMoreOpen(false);
+            if (allVisibleMemosSelected) {
+              handleClearVisibleMemos();
+              return;
+            }
+
+            handleSelectAllVisibleMemos();
+          }}
+          onClearSelection={() => {
+            setMobileMoreOpen(false);
+            onClearSelection();
+          }}
+          onClose={() => setMobileMoreOpen(false)}
+          onMerge={() => {
+            setMobileMoreOpen(false);
+            onMerge();
+          }}
+        />
+      ) : null}
     </div>
   );
 };
 
-const groupMemosByMonth = (memos: MemoSummary[]) => {
+const sortMemos = (memos: MemoSummary[], sortMode: MemoSortMode) =>
+  [...memos].sort((first, second) => {
+    if (sortMode === "title-asc") {
+      const titleCompare = getMemoTitle(first.title).localeCompare(getMemoTitle(second.title), "zh-CN", {
+        numeric: true,
+        sensitivity: "base",
+      });
+
+      if (titleCompare !== 0) {
+        return titleCompare;
+      }
+
+      return compareDateDesc(first.updatedAt, second.updatedAt);
+    }
+
+    if (sortMode === "created-desc") {
+      return compareDateDesc(first.createdAt, second.createdAt);
+    }
+
+    return compareDateDesc(first.updatedAt, second.updatedAt);
+  });
+
+const filterMemos = (memos: MemoSummary[], filterMode: MemoFilterMode) => {
+  if (filterMode === "tagged") {
+    return memos.filter((memo) => memo.tags.length > 0);
+  }
+
+  if (filterMode === "untagged") {
+    return memos.filter((memo) => memo.tags.length === 0);
+  }
+
+  if (filterMode === "pinned") {
+    return memos.filter((memo) => memo.isPinned);
+  }
+
+  return memos;
+};
+
+const getMemoFilterOptions = (memos: MemoSummary[]): Array<{ value: MemoFilterMode; label: string }> => {
+  const options: Array<{ value: MemoFilterMode; label: string }> = [
+    { value: "all", label: "全部" },
+    { value: "tagged", label: "有标签" },
+    { value: "untagged", label: "无标签" },
+  ];
+
+  if (memos.some((memo) => memo.isPinned)) {
+    options.push({ value: "pinned", label: "置顶" });
+  }
+
+  return options;
+};
+
+const getMobileFilterIcon = (filterMode: MemoFilterMode) => {
+  if (filterMode === "tagged") {
+    return <Tags className="h-4 w-4" />;
+  }
+
+  if (filterMode === "untagged") {
+    return <X className="h-4 w-4" />;
+  }
+
+  if (filterMode === "pinned") {
+    return <Sparkles className="h-4 w-4" />;
+  }
+
+  return <LayoutList className="h-4 w-4" />;
+};
+
+const groupMemos = (memos: MemoSummary[], sortMode: MemoSortMode) =>
+  sortMode === "title-asc" ? groupMemosByTitle(memos) : groupMemosByDate(memos, sortMode);
+
+const groupMemosByDate = (memos: MemoSummary[], sortMode: MemoSortMode) => {
   const groups: Array<{ key: string; label: string; items: MemoSummary[] }> = [];
 
   for (const memo of memos) {
-    const date = new Date(memo.updatedAt);
+    const date = new Date(sortMode === "created-desc" ? memo.createdAt : memo.updatedAt);
     const key = Number.isNaN(date.getTime())
       ? "unknown"
       : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
@@ -1517,27 +2928,116 @@ const groupMemosByMonth = (memos: MemoSummary[]) => {
   return groups;
 };
 
+const groupMemosByTitle = (memos: MemoSummary[]) => {
+  const groups: Array<{ key: string; label: string; items: MemoSummary[] }> = [];
+
+  for (const memo of memos) {
+    const title = getMemoTitle(memo.title);
+    const firstChar = title.trim().charAt(0).toLocaleUpperCase("zh-CN");
+    const label = firstChar || "#";
+    const current = groups[groups.length - 1];
+
+    if (current?.key === label) {
+      current.items.push(memo);
+      continue;
+    }
+
+    groups.push({ key: label, label, items: [memo] });
+  }
+
+  return groups;
+};
+
+const compareDateDesc = (first: string, second: string) => {
+  const firstTime = Date.parse(first);
+  const secondTime = Date.parse(second);
+
+  if (Number.isNaN(firstTime) && Number.isNaN(secondTime)) {
+    return 0;
+  }
+
+  if (Number.isNaN(firstTime)) {
+    return 1;
+  }
+
+  if (Number.isNaN(secondTime)) {
+    return -1;
+  }
+
+  return secondTime - firstTime;
+};
+
+const getNotebookMoveOptions = (notebooks: Notebook[]) => {
+  const options: Array<{ id: string; name: string; selectLabel: string; slug: string | null; depth: number }> = [];
+  const walk = (nodes: NotebookNode[], depth: number) => {
+    for (const node of nodes) {
+      options.push({
+        id: node.id,
+        name: node.name,
+        selectLabel: `${"\u00A0\u00A0".repeat(depth)}${depth > 0 ? "└ " : ""}${node.name}`,
+        slug: node.slug,
+        depth,
+      });
+      walk(node.children, depth + 1);
+    }
+  };
+
+  walk(buildNotebookTree(notebooks), 0);
+  return options;
+};
+
 const MemoCard = ({
   memo,
   selected,
   checked,
+  isTrashView,
+  selectionMode,
+  listDensity,
   multiSelectKeyDown,
   onOpen,
+  onDelete,
+  onRestore,
+  onOpenContextMenu,
   onToggle,
 }: {
   memo: MemoSummary;
   selected: boolean;
   checked: boolean;
+  isTrashView: boolean;
+  selectionMode: boolean;
+  listDensity: MemoListDensity;
   multiSelectKeyDown: boolean;
   onOpen: () => void;
-  onToggle: () => void;
+  onDelete: () => void;
+  onRestore: () => void;
+  onOpenContextMenu: (event: MouseEvent<HTMLElement>) => void;
+  onToggle: (event?: MouseEvent<HTMLElement>) => void;
 }) => {
   const handledModifierPointerRef = useRef(false);
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressPointRef = useRef<{ x: number; y: number } | null>(null);
   const memoTitle = getMemoTitle(memo.title);
   const memoExcerpt = memo.excerpt.trim() || "空笔记";
+  const showSelectionControl = selectionMode || checked || multiSelectKeyDown;
 
   const shouldToggleSelection = (event: MouseEvent<HTMLElement>) =>
-    event.ctrlKey || event.metaKey || multiSelectKeyDown;
+    event.ctrlKey || event.metaKey || event.shiftKey || multiSelectKeyDown;
+
+  const clearLongPressTimer = () => {
+    if (longPressTimerRef.current === null) {
+      return;
+    }
+
+    window.clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = null;
+  };
+
+  const resetLongPress = () => {
+    clearLongPressTimer();
+    longPressPointRef.current = null;
+  };
+
+  useEffect(() => () => resetLongPress(), []);
 
   const markModifierPointerHandled = () => {
     handledModifierPointerRef.current = true;
@@ -1550,6 +3050,16 @@ const MemoCard = ({
     event.preventDefault();
     event.stopPropagation();
     markModifierPointerHandled();
+    onToggle(event);
+  };
+
+  const handleLongPressSelection = () => {
+    markModifierPointerHandled();
+
+    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+      navigator.vibrate(8);
+    }
+
     onToggle();
   };
 
@@ -1559,11 +3069,51 @@ const MemoCard = ({
     }
   };
 
+  const handlePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType !== "touch" || selectionMode) {
+      return;
+    }
+
+    clearLongPressTimer();
+    longPressPointRef.current = { x: event.clientX, y: event.clientY };
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressTimerRef.current = null;
+      longPressPointRef.current = null;
+      handleLongPressSelection();
+    }, MEMO_LONG_PRESS_DELAY_MS);
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType !== "touch" || !longPressPointRef.current) {
+      return;
+    }
+
+    const xDistance = Math.abs(event.clientX - longPressPointRef.current.x);
+    const yDistance = Math.abs(event.clientY - longPressPointRef.current.y);
+
+    if (xDistance > MEMO_LONG_PRESS_MOVE_TOLERANCE_PX || yDistance > MEMO_LONG_PRESS_MOVE_TOLERANCE_PX) {
+      resetLongPress();
+    }
+  };
+
+  const handlePointerEnd = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === "touch") {
+      resetLongPress();
+    }
+  };
+
   const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
     if (handledModifierPointerRef.current) {
       event.preventDefault();
       event.stopPropagation();
       handledModifierPointerRef.current = false;
+      return;
+    }
+
+    if (selectionMode) {
+      event.preventDefault();
+      event.stopPropagation();
+      onToggle(event);
       return;
     }
 
@@ -1576,44 +3126,91 @@ const MemoCard = ({
   };
 
   const handleContextMenu = (event: MouseEvent<HTMLButtonElement>) => {
-    if (!shouldToggleSelection(event) && !handledModifierPointerRef.current) {
+    if (longPressPointRef.current) {
+      event.preventDefault();
+      event.stopPropagation();
+      resetLongPress();
+      handleLongPressSelection();
+      return;
+    }
+
+    if (selectionMode) {
+      event.preventDefault();
+      event.stopPropagation();
       return;
     }
 
     event.preventDefault();
     event.stopPropagation();
 
-    if (!handledModifierPointerRef.current) {
+    if (handledModifierPointerRef.current) {
+      return;
+    }
+
+    if (shouldToggleSelection(event)) {
       markModifierPointerHandled();
-      onToggle();
+      onToggle(event);
+      return;
+    }
+
+    if (window.matchMedia("(min-width: 1024px)").matches) {
+      onOpenContextMenu(event);
     }
   };
 
   return (
     <article
+      data-memo-id={memo.id}
       className={cn(
-        "border-b border-slate-200 transition last:border-b-0",
-        selected ? "bg-slate-200" : checked ? "bg-emerald-50/80" : "bg-white hover:bg-slate-50"
+        "group rounded-md border border-slate-100 bg-white shadow-[0_8px_22px_rgba(15,23,42,0.05)] transition lg:rounded-none lg:border-x-0 lg:border-t-0 lg:border-slate-200 lg:shadow-none lg:last:border-b-0",
+        !selectionMode && selected ? "lg:bg-slate-200" : checked ? "ring-1 ring-emerald-100 lg:ring-0" : "hover:bg-slate-50"
       )}
     >
-      <div className="flex min-h-[128px] items-start">
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={onToggle}
-          className="ml-4 mt-5 h-4 w-4 shrink-0 rounded border-slate-300 text-emerald-600"
-          aria-label={`选择 ${memoTitle}`}
-        />
+      <div className={cn("flex min-h-[128px] items-start", listDensity === "compact" && "lg:min-h-[76px]")}>
+        {showSelectionControl ? (
+          <button
+            className={cn(
+              "ml-4 mt-8 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border transition",
+              listDensity === "compact" && "lg:mt-6",
+              checked ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-300 bg-white text-transparent"
+            )}
+            type="button"
+            aria-label={`选择 ${memoTitle}`}
+            aria-pressed={checked}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggle(event);
+            }}
+          >
+            <CheckCircle2 className="h-6 w-6" />
+          </button>
+        ) : null}
         <button
-          className={cn("min-w-0 flex-1 px-4 py-4 text-left", multiSelectKeyDown && "cursor-copy")}
+          className={cn(
+            "min-w-0 flex-1 select-none px-4 py-4 text-left touch-pan-y [-webkit-touch-callout:none]",
+            showSelectionControl && "pl-3",
+            multiSelectKeyDown && "cursor-copy"
+          )}
           onMouseDown={handleMouseDown}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerEnd}
+          onPointerCancel={handlePointerEnd}
+          onLostPointerCapture={resetLongPress}
           onClick={handleClick}
           onContextMenu={handleContextMenu}
-          title="Ctrl/Cmd 点击切换选择"
+          title="Ctrl/Cmd 点击切换选择，Shift 点击连续选择，移动端长按进入选择"
         >
           <div className="mb-2 truncate text-base font-semibold leading-6 text-slate-900">{memoTitle}</div>
-          <div className="line-clamp-2 min-h-10 text-[15px] leading-5 text-slate-600">{memoExcerpt}</div>
-          <div className="mt-5 flex flex-wrap items-center gap-2">
+          <div
+            className={cn(
+              "line-clamp-2 min-h-10 text-[15px] leading-5 text-slate-600",
+              listDensity === "compact" && "lg:line-clamp-1 lg:min-h-0 lg:text-sm"
+            )}
+          >
+            {memoExcerpt}
+          </div>
+          <div className={cn("mt-5 flex flex-wrap items-center gap-2", listDensity === "compact" && "lg:mt-2")}>
             <time className="text-sm text-slate-500">{formatMemoPreviewDate(memo.updatedAt)}</time>
             {memo.tags.slice(0, 3).map((tag) => (
               <span key={tag} className="rounded-sm bg-emerald-50 px-1.5 py-0.5 text-xs font-medium text-emerald-700">
@@ -1622,6 +3219,29 @@ const MemoCard = ({
             ))}
           </div>
         </button>
+        {!selectionMode ? (
+          <button
+            className={cn(
+              "mr-3 mt-4 hidden h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-400 opacity-0 transition group-hover:opacity-100 lg:flex",
+              isTrashView ? "hover:bg-emerald-50 hover:text-emerald-700" : "hover:bg-rose-50 hover:text-rose-700",
+              selected && "opacity-100",
+              listDensity === "compact" && "lg:mt-3"
+            )}
+            type="button"
+            title={isTrashView ? "恢复笔记" : "删除笔记"}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (isTrashView) {
+                onRestore();
+                return;
+              }
+
+              onDelete();
+            }}
+          >
+            {isTrashView ? <RotateCcw className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
+          </button>
+        ) : null}
       </div>
     </article>
   );
@@ -1831,7 +3451,7 @@ const TagsDialog = ({ onClose }: { onClose: () => void }) => {
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-semibold text-slate-950">#{tag.name}</span>
                     <span className="mt-1 block text-xs text-slate-500">
-                      {tag.memoCount} memos{tag.updatedAt ? ` · ${formatDateTime(tag.updatedAt)}` : ""}
+                      {tag.memoCount} 条笔记{tag.updatedAt ? ` · ${formatDateTime(tag.updatedAt)}` : ""}
                     </span>
                   </span>
                   <Button size="icon" variant="ghost" title="重命名标签" onClick={() => handleRename(tag)}>
@@ -2410,6 +4030,78 @@ const EditorToolbarButton = ({
 
 const ToolbarDivider = () => <div className="h-6 w-px shrink-0 bg-emerald-100" />;
 
+const MobileEditorActionsSheet = ({
+  readOnly,
+  onClose,
+  onDelete,
+  onOpenHistory,
+  onPermanentDelete,
+  onRestore,
+}: {
+  readOnly: boolean;
+  onClose: () => void;
+  onDelete: () => void;
+  onOpenHistory: () => void;
+  onPermanentDelete: () => void;
+  onRestore: () => void;
+}) => (
+  <div className="fixed inset-0 z-50 bg-slate-950/25 lg:hidden" onClick={onClose}>
+    <section
+      className="absolute inset-x-0 bottom-0 overflow-hidden rounded-t-md border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] shadow-[0_-16px_40px_rgba(15,23,42,0.16)]"
+      onClick={(event) => event.stopPropagation()}
+    >
+      <div className="flex justify-center py-2">
+        <div className="h-1 w-10 rounded-full bg-slate-300" />
+      </div>
+      <header className="flex h-12 items-center justify-between border-b border-slate-200 px-4">
+        <div className="text-base font-semibold text-slate-950">笔记操作</div>
+        <Button size="icon" variant="ghost" title="关闭" onClick={onClose}>
+          <X className="h-4 w-4" />
+        </Button>
+      </header>
+      <div className="p-2">
+        <button
+          className="flex h-12 w-full items-center gap-3 rounded-md px-3 text-left text-sm font-medium text-slate-800 transition hover:bg-slate-50"
+          type="button"
+          onClick={onOpenHistory}
+        >
+          <History className="h-5 w-5 text-slate-500" />
+          <span className="min-w-0 flex-1 truncate text-base">版本历史</span>
+        </button>
+        {readOnly ? (
+          <>
+            <button
+              className="flex h-12 w-full items-center gap-3 rounded-md px-3 text-left text-sm font-medium text-slate-800 transition hover:bg-slate-50"
+              type="button"
+              onClick={onRestore}
+            >
+              <RotateCcw className="h-5 w-5 text-slate-500" />
+              <span className="min-w-0 flex-1 truncate text-base">恢复笔记</span>
+            </button>
+            <button
+              className="flex h-12 w-full items-center gap-3 rounded-md px-3 text-left text-sm font-medium text-rose-700 transition hover:bg-rose-50"
+              type="button"
+              onClick={onPermanentDelete}
+            >
+              <Trash2 className="h-5 w-5" />
+              <span className="min-w-0 flex-1 truncate text-base">彻底删除</span>
+            </button>
+          </>
+        ) : (
+          <button
+            className="flex h-12 w-full items-center gap-3 rounded-md px-3 text-left text-sm font-medium text-rose-700 transition hover:bg-rose-50"
+            type="button"
+            onClick={onDelete}
+          >
+            <Trash2 className="h-5 w-5" />
+            <span className="min-w-0 flex-1 truncate text-base">删除笔记</span>
+          </button>
+        )}
+      </div>
+    </section>
+  </div>
+);
+
 const getActiveBlockValue = (editor: Editor | null) => {
   if (!editor) {
     return "paragraph";
@@ -2436,7 +4128,11 @@ const EditorPane = ({
   notebooks,
   isLoading,
   imageCompressionEnabled,
+  hasNextMemo,
+  hasPreviousMemo,
   onBackToList,
+  onOpenNextMemo,
+  onOpenPreviousMemo,
   onSaved,
   onDeleted,
   onPermanentDeleted,
@@ -2447,7 +4143,11 @@ const EditorPane = ({
   notebooks: Notebook[];
   isLoading: boolean;
   imageCompressionEnabled: boolean;
+  hasNextMemo: boolean;
+  hasPreviousMemo: boolean;
   onBackToList: () => void;
+  onOpenNextMemo: () => void;
+  onOpenPreviousMemo: () => void;
   onSaved: (memo: MemoDetail) => Promise<void>;
   onDeleted: (memoId: string) => Promise<void>;
   onPermanentDeleted: (memoId: string) => Promise<void>;
@@ -2462,8 +4162,11 @@ const EditorPane = ({
   const [, setEditorStateVersion] = useState(0);
   const [imageUploadState, setImageUploadState] = useState<"idle" | "compressing" | "uploading" | "error">("idle");
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [editorActionsOpen, setEditorActionsOpen] = useState(false);
+  const notebookOptions = useMemo(() => getNotebookMoveOptions(notebooks), [notebooks]);
   const memoRef = useRef<MemoDetail | null>(memo);
   const editorRef = useRef<Editor | null>(null);
+  const editorActionsRef = useDismissableLayer<HTMLDivElement>(editorActionsOpen, () => setEditorActionsOpen(false));
   const hydratingRef = useRef(false);
   const hasUnsavedChangesRef = useRef(false);
   const editingMemoIdRef = useRef<string | null>(memo?.id ?? null);
@@ -2522,7 +4225,7 @@ const EditorPane = ({
         inline: false,
       }),
       Placeholder.configure({
-        placeholder: "Start writing...",
+        placeholder: "开始记录...",
       }),
     ],
     content: memo?.contentJson ?? { type: "doc", content: [{ type: "paragraph" }] },
@@ -2840,7 +4543,7 @@ const EditorPane = ({
       <div className="flex h-full items-center justify-center bg-white px-8 text-center">
         <div>
           <Sparkles className="mx-auto mb-3 h-8 w-8 text-slate-300" />
-          <div className="text-sm font-medium text-slate-700">Select or create a memo</div>
+          <div className="text-sm font-medium text-slate-700">选择或新建一条笔记</div>
         </div>
       </div>
     );
@@ -2861,18 +4564,35 @@ const EditorPane = ({
               : hasUnsavedChanges
                 ? "未保存"
                 : "已保存";
+  const saveStateClassName =
+    saveState === "error" || saveState === "conflict"
+      ? "bg-rose-50 text-rose-700"
+      : saveState === "queued"
+        ? "bg-amber-50 text-amber-700"
+        : saveState === "saving" || hasUnsavedChanges
+          ? "bg-emerald-50 text-emerald-700"
+          : "bg-slate-100 text-slate-500";
+  const updatedLabel = formatDateTime(memo.updatedAt);
 
   return (
     <div className="flex h-full min-w-0 flex-col">
       <header className="shrink-0 border-b border-emerald-100 bg-white">
-        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-3 sm:px-5">
-          <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-h-12 items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 sm:px-5">
+          <div className="flex min-w-0 items-center gap-2 text-sm">
             <Button className="lg:hidden" size="icon" variant="ghost" title="返回列表" onClick={onBackToList}>
-              <LayoutList className="h-4 w-4" />
+              <ChevronLeft className="h-4 w-4" />
             </Button>
+            <div className="hidden items-center gap-1 lg:flex">
+              <Button size="icon" variant="ghost" title="上一条笔记" onClick={onOpenPreviousMemo} disabled={!hasPreviousMemo}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button size="icon" variant="ghost" title="下一条笔记" onClick={onOpenNextMemo} disabled={!hasNextMemo}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
             <select
               value={memo.notebookId}
-              className="h-8 min-w-0 max-w-[170px] rounded-md border border-emerald-100 bg-emerald-50/70 px-2 text-xs text-emerald-900 outline-none sm:max-w-none"
+              className="h-8 min-w-0 max-w-[180px] rounded-md border border-transparent bg-transparent px-2 text-xs font-medium text-slate-700 outline-none hover:border-emerald-100 hover:bg-emerald-50/70 sm:max-w-[260px]"
               disabled={readOnly}
               onChange={(event) => {
                 void api
@@ -2882,20 +4602,24 @@ const EditorPane = ({
                   })
                   .then((data) => onSaved(data.memo));
               }}
+              title="所在笔记本"
             >
-              {notebooks.map((notebook) => (
+              {notebookOptions.map((notebook) => (
                 <option key={notebook.id} value={notebook.id}>
-                  {notebook.name}
+                  {notebook.selectLabel}
                 </option>
               ))}
             </select>
+            <span className="hidden truncate text-xs text-slate-400 sm:inline">
+              更新于 {updatedLabel}
+            </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1">
             {imageUploadState !== "idle" ? (
               <span
                 className={cn(
-                  "hidden rounded-md px-2 py-1 text-xs font-medium sm:inline-flex",
+                  "hidden rounded-md px-2 py-1 text-xs font-medium md:inline-flex",
                   imageUploadState === "error"
                     ? "bg-rose-50 text-rose-700"
                     : "bg-emerald-50 text-emerald-700"
@@ -2908,44 +4632,112 @@ const EditorPane = ({
                     : "图片上传中"}
               </span>
             ) : null}
-            <Button size="sm" variant="ghost" title="版本历史" onClick={() => setHistoryOpen(true)}>
+            <span className={cn("hidden rounded-md px-2 py-1 text-xs font-medium sm:inline-flex", saveStateClassName)}>
+              {saveLabel}
+            </span>
+            <Button className="hidden sm:inline-flex" size="icon" variant="ghost" title="版本历史" onClick={() => setHistoryOpen(true)}>
               <History className="h-4 w-4" />
             </Button>
-            {readOnly ? (
-              <>
-                <Button size="sm" variant="solid" title="恢复笔记" onClick={() => void onRestored(memo.id)}>
-                  <RotateCcw className="h-4 w-4" />
-                  恢复
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  title="彻底删除"
-                  onClick={() => {
+            {!readOnly ? (
+              <Button
+                size="icon"
+                variant="solid"
+                title="保存"
+                onClick={() => saveMutation.mutate()}
+                disabled={!editor || saveMutation.isPending || !hasUnsavedChanges}
+              >
+                <Save className="h-4 w-4" />
+              </Button>
+            ) : null}
+            <div className="relative" ref={editorActionsRef}>
+              <Button
+                size="icon"
+                variant="ghost"
+                title="更多"
+                onClick={() => setEditorActionsOpen((value) => !value)}
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+              {editorActionsOpen ? (
+                <div className="absolute right-0 top-9 z-30 hidden w-44 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-panel lg:block">
+                  <button
+                    className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                    type="button"
+                    onClick={() => {
+                      setEditorActionsOpen(false);
+                      setHistoryOpen(true);
+                    }}
+                  >
+                    <History className="h-4 w-4" />
+                    版本历史
+                  </button>
+                  {readOnly ? (
+                    <>
+                      <button
+                        className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                        type="button"
+                        onClick={() => {
+                          setEditorActionsOpen(false);
+                          void onRestored(memo.id);
+                        }}
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                        恢复笔记
+                      </button>
+                      <button
+                        className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-rose-700 transition hover:bg-rose-50"
+                        type="button"
+                        onClick={() => {
+                          setEditorActionsOpen(false);
+                          if (window.confirm("彻底删除后无法恢复，确认继续吗？")) {
+                            void onPermanentDeleted(memo.id);
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        彻底删除
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-rose-700 transition hover:bg-rose-50"
+                      type="button"
+                      onClick={() => {
+                        setEditorActionsOpen(false);
+                        void onDeleted(memo.id);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      删除笔记
+                    </button>
+                  )}
+                </div>
+              ) : null}
+              {editorActionsOpen ? (
+                <MobileEditorActionsSheet
+                  readOnly={readOnly}
+                  onClose={() => setEditorActionsOpen(false)}
+                  onOpenHistory={() => {
+                    setEditorActionsOpen(false);
+                    setHistoryOpen(true);
+                  }}
+                  onRestore={() => {
+                    setEditorActionsOpen(false);
+                    void onRestored(memo.id);
+                  }}
+                  onPermanentDelete={() => {
+                    setEditorActionsOpen(false);
                     if (window.confirm("彻底删除后无法恢复，确认继续吗？")) {
                       void onPermanentDeleted(memo.id);
                     }
                   }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button size="sm" variant="ghost" title="删除笔记" onClick={() => void onDeleted(memo.id)}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-                <Button
-                  size="sm"
-                  variant="solid"
-                  onClick={() => saveMutation.mutate()}
-                  disabled={!editor || saveMutation.isPending || !hasUnsavedChanges}
-                >
-                  <Save className="h-4 w-4" />
-                  {saveLabel}
-                </Button>
-              </>
-            )}
+                  onDelete={() => {
+                    setEditorActionsOpen(false);
+                    void onDeleted(memo.id);
+                  }}
+                />
+              ) : null}
+            </div>
           </div>
         </div>
 
@@ -2972,7 +4764,7 @@ const EditorPane = ({
                 markDirty();
               }}
               className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-slate-400"
-              placeholder="tags"
+              placeholder="添加标签，用逗号分隔"
             />
           </label>
         </div>

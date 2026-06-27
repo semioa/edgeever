@@ -5,6 +5,7 @@ import {
   docToText,
   emptyDoc,
   ApiTokenCreateSchema,
+  DeleteMemosSchema,
   LoginSchema,
   markdownToDoc,
   MemoCreateSchema,
@@ -709,6 +710,28 @@ app.post("/api/v1/memos/batch/move", zValidator("json", MoveMemosSchema), async 
     const moved = await moveMemosToNotebook(c.env.DB, input.memoIds, input.notebookId, actor, actorLabel);
 
     return c.json({ ok: true, moved });
+  } catch (error) {
+    if (error instanceof AppError) {
+      return apiError(c, error.code, error.message, error.status);
+    }
+
+    throw error;
+  }
+});
+
+app.post("/api/v1/memos/batch/delete", zValidator("json", DeleteMemosSchema), async (c) => {
+  const denied = requireScopes(c, "write:memos");
+
+  if (denied) {
+    return denied;
+  }
+
+  const input = c.req.valid("json");
+  const actor = getAuditActor(c);
+
+  try {
+    const deleted = await deleteMemosRecord(c.env.DB, c.env.RESOURCES, input.memoIds, Boolean(input.permanent), actor);
+    return c.json({ ok: true, deleted });
   } catch (error) {
     if (error instanceof AppError) {
       return apiError(c, error.code, error.message, error.status);
@@ -2458,6 +2481,88 @@ const getMemoDetailRow = async (
 const getMemoDetail = async (db: D1Database, id: string, includeDeleted = false): Promise<MemoDetail | null> => {
   const row = await getMemoDetailRow(db, id, includeDeleted);
   return row ? mapMemoDetail(row) : null;
+};
+
+const deleteMemosRecord = async (
+  db: D1Database,
+  resourcesBucket: R2Bucket,
+  memoIds: string[],
+  permanent: boolean,
+  actor: { actorType: "user" | "agent"; actorId: string | null }
+) => {
+  const uniqueMemoIds = Array.from(new Set(memoIds));
+
+  if (uniqueMemoIds.length === 0) {
+    return 0;
+  }
+
+  const placeholders = uniqueMemoIds.map(() => "?").join(", ");
+  const expectedDeletedState = permanent ? 1 : 0;
+  const rows = await db
+    .prepare(
+      `SELECT id
+       FROM memos
+       WHERE is_deleted = ? AND id IN (${placeholders})`
+    )
+    .bind(expectedDeletedState, ...uniqueMemoIds)
+    .all<{ id: string }>();
+
+  if (rows.results.length !== uniqueMemoIds.length) {
+    throw new AppError(
+      "missing_memos",
+      permanent ? "One or more memos cannot be permanently deleted." : "One or more memos cannot be deleted.",
+      400
+    );
+  }
+
+  const now = isoNow();
+  const statements: D1PreparedStatement[] = [];
+
+  if (permanent) {
+    const resourceRows = await db
+      .prepare(
+        `SELECT object_key
+         FROM resources
+         WHERE memo_id IN (${placeholders})`
+      )
+      .bind(...uniqueMemoIds)
+      .all<{ object_key: string }>();
+    const objectKeys = resourceRows.results.map((resource) => resource.object_key);
+
+    if (objectKeys.length > 0) {
+      await resourcesBucket.delete(objectKeys);
+    }
+
+    statements.push(
+      db.prepare(`DELETE FROM memos_fts WHERE memo_id IN (${placeholders})`).bind(...uniqueMemoIds),
+      db.prepare(`DELETE FROM resources WHERE memo_id IN (${placeholders})`).bind(...uniqueMemoIds),
+      db.prepare(`DELETE FROM memo_revisions WHERE memo_id IN (${placeholders})`).bind(...uniqueMemoIds),
+      db.prepare(`DELETE FROM memo_contents WHERE memo_id IN (${placeholders})`).bind(...uniqueMemoIds),
+      db.prepare(`DELETE FROM memos WHERE is_deleted = 1 AND id IN (${placeholders})`).bind(...uniqueMemoIds)
+    );
+
+    for (const memoId of uniqueMemoIds) {
+      statements.push(auditStatement(db, actor.actorType, actor.actorId, "memo.delete_permanent", "memo", memoId, {}));
+    }
+  } else {
+    statements.push(
+      db
+        .prepare(
+          `UPDATE memos
+           SET is_deleted = 1, deleted_at = ?, updated_at = ?
+           WHERE is_deleted = 0 AND id IN (${placeholders})`
+        )
+        .bind(now, now, ...uniqueMemoIds),
+      db.prepare(`DELETE FROM memos_fts WHERE memo_id IN (${placeholders})`).bind(...uniqueMemoIds)
+    );
+
+    for (const memoId of uniqueMemoIds) {
+      statements.push(auditStatement(db, actor.actorType, actor.actorId, "memo.delete", "memo", memoId, {}));
+    }
+  }
+
+  await db.batch(statements);
+  return uniqueMemoIds.length;
 };
 
 const moveMemosToNotebook = async (

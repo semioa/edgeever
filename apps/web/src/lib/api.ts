@@ -184,6 +184,12 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  deleteMemos: (payload: { memoIds: string[]; permanent?: boolean }) =>
+    request<{ ok: true; deleted: number }>("/api/v1/memos/batch/delete", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
   getMemo: (memoId: string, options?: { includeDeleted?: boolean }) => {
     const search = new URLSearchParams();
 

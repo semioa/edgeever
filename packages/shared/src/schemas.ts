@@ -32,6 +32,11 @@ export const MoveMemosSchema = z.object({
   notebookId: z.string().trim().min(1),
 });
 
+export const DeleteMemosSchema = z.object({
+  memoIds: z.array(z.string().trim().min(1)).min(1).max(100),
+  permanent: z.boolean().optional(),
+});
+
 export const MergeMemosSchema = z.object({
   memoIds: z.array(z.string().trim().min(1)).min(2).max(50),
   notebookId: z.string().trim().min(1).optional(),
@@ -58,6 +63,7 @@ export type NotebookUpdateInput = z.infer<typeof NotebookUpdateSchema>;
 export type MemoCreateInput = z.infer<typeof MemoCreateSchema>;
 export type MemoUpdateInput = z.infer<typeof MemoUpdateSchema>;
 export type MoveMemosInput = z.infer<typeof MoveMemosSchema>;
+export type DeleteMemosInput = z.infer<typeof DeleteMemosSchema>;
 export type MergeMemosInput = z.infer<typeof MergeMemosSchema>;
 export type LoginInput = z.infer<typeof LoginSchema>;
 export type ApiTokenCreateInput = z.infer<typeof ApiTokenCreateSchema>;

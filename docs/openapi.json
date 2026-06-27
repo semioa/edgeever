@@ -459,6 +459,43 @@
         }
       }
     },
+    "/api/v1/memos/batch/delete": {
+      "post": {
+        "summary": "Delete memos",
+        "description": "Soft-deletes active memos, or permanently deletes trashed memos when permanent is true.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteMemosInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Delete result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "deleted": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": ["ok", "deleted"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/memos/merge": {
       "post": {
         "summary": "Merge memos",
@@ -1178,6 +1215,23 @@
           }
         },
         "required": ["memoIds", "notebookId"]
+      },
+      "DeleteMemosInput": {
+        "type": "object",
+        "properties": {
+          "memoIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "type": "string"
+            }
+          },
+          "permanent": {
+            "type": "boolean"
+          }
+        },
+        "required": ["memoIds"]
       },
       "MergeMemosInput": {
         "type": "object",
