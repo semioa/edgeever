@@ -910,37 +910,6 @@ export const EditorPane = ({
                 <ChevronRight className="h-4 w-4" />
               </Button>
             </div>
-            <button
-              className="flex h-8 min-w-0 max-w-[112px] items-center gap-1 rounded-md border border-transparent bg-transparent px-2 text-xs font-medium text-slate-700 outline-none transition hover:border-slate-200 hover:bg-slate-50 focus-visible:border-emerald-300 focus-visible:ring-2 focus-visible:ring-emerald-500/20 disabled:opacity-50 sm:hidden whitespace-nowrap"
-              type="button"
-              disabled={readOnly || notebookUpdatePending}
-              title="所在笔记本"
-              aria-label={`所在笔记本：${currentNotebookLabel}`}
-              onClick={() => setMobileNotebookSheetOpen(true)}
-            >
-              <span className="min-w-0 truncate whitespace-nowrap">{currentNotebookLabel}</span>
-              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-            </button>
-
-            <div className="hidden sm:block">
-              <Select
-                value={memo.notebookId}
-                disabled={readOnly || notebookUpdatePending}
-                onValueChange={(value) => handleNotebookChange(value)}
-              >
-                <SelectTrigger className="h-8 min-w-0 max-w-[260px] text-xs font-semibold text-slate-700 border-transparent bg-transparent hover:border-slate-200 hover:bg-slate-50 whitespace-nowrap">
-                  <SelectValue placeholder="所在笔记本" />
-                </SelectTrigger>
-                <SelectContent className="max-h-60 bg-white border border-slate-200 rounded-md py-1 shadow-md">
-                  {notebookOptions.map((notebook) => (
-                    <SelectItem key={notebook.id} value={notebook.id}>
-                      {notebook.selectLabel}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
             <span className="hidden truncate text-xs text-slate-400 sm:inline">
               更新于 {updatedLabel}
             </span>
@@ -1079,20 +1048,51 @@ export const EditorPane = ({
             className="block w-full rounded-md border-0 bg-transparent text-2xl font-bold leading-tight text-slate-950 outline-none transition placeholder:text-slate-300 focus-visible:bg-slate-50 focus-visible:shadow-[inset_3px_0_0_var(--brand-green)] sm:text-3xl"
             placeholder={DEFAULT_MEMO_TITLE}
           />
-          <label className="flex h-8 items-center gap-2 rounded-md border border-transparent px-2 text-sm text-slate-500 transition focus-within:border-slate-200 focus-within:bg-slate-50 focus-within:ring-2 focus-within:ring-emerald-500/15">
-            <Tags className="h-4 w-4" />
-            <input
-              value={tagsText}
-              readOnly={readOnly}
-              onChange={(event) => {
-                setTagsText(event.target.value);
-                persistCurrentDraft(title, event.target.value);
-                markDirty();
-              }}
-              className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-slate-400"
-              placeholder="添加标签，用逗号分隔"
-            />
-          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className="flex h-8 min-w-0 max-w-full items-center gap-1 rounded-md border border-transparent bg-transparent px-2 text-sm font-medium text-slate-600 outline-none transition hover:border-slate-200 hover:bg-slate-50 hover:text-slate-900 focus-visible:border-emerald-300 focus-visible:ring-2 focus-visible:ring-emerald-500/20 disabled:opacity-50 sm:hidden"
+              type="button"
+              disabled={readOnly || notebookUpdatePending}
+              title="所在笔记本"
+              aria-label={`所在笔记本：${currentNotebookLabel}`}
+              onClick={() => setMobileNotebookSheetOpen(true)}
+            >
+              <span className="min-w-0 truncate">{currentNotebookLabel}</span>
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+            </button>
+            <div className="hidden min-w-[9rem] max-w-[18rem] sm:block">
+              <Select
+                value={memo.notebookId}
+                disabled={readOnly || notebookUpdatePending}
+                onValueChange={(value) => handleNotebookChange(value)}
+              >
+                <SelectTrigger className="h-8 min-w-0 border-transparent bg-transparent px-2 text-sm font-medium text-slate-600 hover:border-slate-200 hover:bg-slate-50 hover:text-slate-900 whitespace-nowrap">
+                  <SelectValue placeholder="所在笔记本" />
+                </SelectTrigger>
+                <SelectContent className="max-h-60 bg-white border border-slate-200 rounded-md py-1 shadow-md">
+                  {notebookOptions.map((notebook) => (
+                    <SelectItem key={notebook.id} value={notebook.id}>
+                      {notebook.selectLabel}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <label className="flex h-8 min-w-[12rem] flex-1 items-center gap-2 rounded-md border border-transparent px-2 text-sm text-slate-500 transition focus-within:border-slate-200 focus-within:bg-slate-50 focus-within:ring-2 focus-within:ring-emerald-500/15">
+              <Tags className="h-4 w-4" />
+              <input
+                value={tagsText}
+                readOnly={readOnly}
+                onChange={(event) => {
+                  setTagsText(event.target.value);
+                  persistCurrentDraft(title, event.target.value);
+                  markDirty();
+                }}
+                className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-slate-400"
+                placeholder="添加标签，用逗号分隔"
+              />
+            </label>
+          </div>
         </div>
         {noteSearchOpen && (
           <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 px-4 py-2 sm:px-7">
