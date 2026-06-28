@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, Image, KeyRound, LogOut, Plus, ShieldCheck, Trash2, User } from "lucide-react";
+import { ChevronLeft, Copy, Image, KeyRound, LogOut, Plus, ShieldCheck, Trash2, User } from "lucide-react";
 import type { ApiToken, AuthUser } from "@edgeever/shared";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,6 +34,36 @@ const TOKEN_SCOPE_LABELS: Record<string, string> = {
 };
 
 const getTokenScopeLabel = (scope: string) => TOKEN_SCOPE_LABELS[scope] ?? scope;
+
+const copyTextToClipboard = async (text: string) => {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall back to the textarea path below.
+    }
+  }
+
+  if (typeof document === "undefined") {
+    return false;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  try {
+    return document.execCommand("copy");
+  } finally {
+    document.body.removeChild(textarea);
+  }
+};
 
 interface SettingsPaneProps {
   user: AuthUser | null;
@@ -85,11 +115,13 @@ const PreferenceCard = ({ imageCompressionEnabled, onImageCompressionChange }: P
           <div className="text-sm font-semibold text-slate-900">压缩笔记内图片</div>
           <div className="mt-0.5 text-xs leading-4 text-slate-500">上传大图时在本地压缩，节省资源占用。</div>
         </div>
-        <Switch
-          checked={imageCompressionEnabled}
-          onCheckedChange={onImageCompressionChange}
-          aria-label="是否压缩笔记内图片"
-        />
+        <div className="flex w-32 shrink-0 justify-start">
+          <Switch
+            checked={imageCompressionEnabled}
+            onCheckedChange={onImageCompressionChange}
+            aria-label="是否压缩笔记内图片"
+          />
+        </div>
       </div>
     </CardContent>
   </Card>
@@ -99,31 +131,90 @@ interface CreatedTokenNoticeProps {
   token: string;
 }
 
-const CreatedTokenNotice = ({ token }: CreatedTokenNoticeProps) => (
-  <div className="rounded-lg border border-emerald-200 bg-emerald-50/80 p-3">
-    <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-emerald-900">
-      <ShieldCheck className="h-4 w-4 text-emerald-700" />
-      API Token 已成功生成
+const CreatedTokenNotice = ({ token }: CreatedTokenNoticeProps) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    if (!(await copyTextToClipboard(token))) {
+      return;
+    }
+
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
+
+  return (
+    <div className="rounded-lg border border-emerald-200 bg-emerald-50/80 p-3">
+      <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-emerald-900">
+        <ShieldCheck className="h-4 w-4 text-emerald-700" />
+        API Token 已成功生成
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Input
+          className="h-8 min-w-0 flex-1 border-emerald-200 font-mono text-xs focus-visible:ring-emerald-500/20"
+          readOnly
+          value={token}
+        />
+        <Button
+          size="sm"
+          variant="solid"
+          className="whitespace-nowrap bg-emerald-600 text-white hover:bg-emerald-700"
+          type="button"
+          onClick={() => void handleCopy()}
+        >
+          {copied ? "已复制" : "复制 Token"}
+        </Button>
+      </div>
+      <p className="mt-2 text-xs font-medium leading-4 text-emerald-800">安全提醒：明文 Token 仅展示一次，关闭后无法再次找回。</p>
     </div>
-    <div className="flex flex-col gap-2 sm:flex-row">
-      <Input
-        className="h-8 min-w-0 flex-1 border-emerald-200 font-mono text-xs focus-visible:ring-emerald-500/20"
-        readOnly
-        value={token}
-      />
-      <Button
-        size="sm"
-        variant="solid"
-        className="bg-emerald-600 text-white hover:bg-emerald-700"
-        type="button"
-        onClick={() => void navigator.clipboard?.writeText(token)}
-      >
-        复制 Token
-      </Button>
+  );
+};
+
+const getMcpRemoteServerUrl = () => {
+  if (typeof window === "undefined") {
+    return "/mcp";
+  }
+
+  return `${window.location.origin}/mcp`;
+};
+
+const McpRemoteServerField = () => {
+  const mcpRemoteServerUrl = getMcpRemoteServerUrl();
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    if (!(await copyTextToClipboard(mcpRemoteServerUrl))) {
+      return;
+    }
+
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
+
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-100 bg-slate-50/70 p-3">
+      <span className="block text-xs font-semibold text-slate-500">MCP Remote Server</span>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <div
+          className="flex min-h-9 min-w-0 flex-1 items-center rounded-md border border-slate-100 bg-white/70 px-3 font-mono text-xs text-slate-800"
+          title={mcpRemoteServerUrl}
+        >
+          <span className="truncate">{mcpRemoteServerUrl}</span>
+        </div>
+        <Button
+          size="md"
+          variant="outline"
+          className="h-9 w-32 whitespace-nowrap bg-white"
+          type="button"
+          onClick={() => void handleCopy()}
+        >
+          <Copy className="h-3.5 w-3.5" />
+          {copied ? "已复制" : "复制地址"}
+        </Button>
+      </div>
     </div>
-    <p className="mt-2 text-xs font-medium leading-4 text-emerald-800">安全提醒：明文 Token 仅展示一次，关闭后无法再次找回。</p>
-  </div>
-);
+  );
+};
 
 interface ScopePickerProps {
   availableScopes: string[];
@@ -267,6 +358,7 @@ const TokenCard = ({
       <CardDescription className="text-xs leading-4">为 MCP 客户端或第三方工具生成访问凭证。</CardDescription>
     </CardHeader>
     <CardContent className="space-y-4 p-4 pt-0">
+      <McpRemoteServerField />
       {createdToken && <CreatedTokenNotice token={createdToken} />}
 
       <form className="space-y-4 rounded-lg border border-slate-100 bg-slate-50/70 p-3" onSubmit={onSubmit}>
@@ -280,7 +372,7 @@ const TokenCard = ({
           <Button
             size="md"
             variant="solid"
-            className="h-9 bg-emerald-500 text-white hover:bg-emerald-600 sm:shrink-0"
+            className="h-9 w-32 whitespace-nowrap bg-emerald-500 text-white hover:bg-emerald-600"
             type="submit"
             disabled={isCreating}
           >
