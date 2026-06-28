@@ -60,7 +60,6 @@
     "clsx": "latest",
     "cmdk": "^1.1.1",
     "dexie": "latest",
-    "gifuct-js": "^2.1.2",
     "hono": "latest",
     "lucide-react": "latest",
     "react": "latest",
@@ -68,7 +67,6 @@
     "tailwind-merge": "latest",
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^1.1.2",
-    "wasm-webp": "^0.1.0",
     "workbox-window": "^7.4.1",
     "zod": "latest"
   },
