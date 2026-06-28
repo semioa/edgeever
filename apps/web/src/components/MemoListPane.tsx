@@ -756,7 +756,13 @@ export const MemoListPane = ({
               <Search className="h-4 w-4 shrink-0" />
               <input
                 ref={mobileSearchInputRef}
+                type="search"
                 value={search}
+                autoCapitalize="none"
+                autoComplete="off"
+                autoCorrect="off"
+                enterKeyHint="search"
+                spellCheck={false}
                 onChange={(event) => handleSearchChange(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key !== "Escape") {
@@ -996,7 +1002,13 @@ export const MemoListPane = ({
             <Search className="h-4 w-4" />
             <input
               ref={searchInputRef}
+              type="search"
               value={search}
+              autoCapitalize="none"
+              autoComplete="off"
+              autoCorrect="off"
+              enterKeyHint="search"
+              spellCheck={false}
               onChange={(event) => handleSearchChange(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Escape" && search) {
