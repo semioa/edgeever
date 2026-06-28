@@ -28,7 +28,6 @@ import {
   Folder,
   Merge,
   FilePlus2,
-  Plus,
   Compass,
   Layers,
   Settings,
@@ -520,31 +519,6 @@ const MobileHomeHeader = ({
       </button>
       <GitHubRepositoryLink className="flex h-9 w-9 justify-center rounded-full text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70" />
     </div>
-  </div>
-);
-
-const MobileQuickActions = ({
-  canCreateMemo,
-  isCreating,
-  locked,
-  onCreateMemo,
-}: {
-  canCreateMemo: boolean;
-  isCreating: boolean;
-  locked: boolean;
-  onCreateMemo: () => void;
-}) => (
-  <div className="mb-4 flex flex-wrap gap-2 lg:hidden">
-    <Button
-      className="flex-1 justify-center rounded-full shadow-sm"
-      size="sm"
-      variant="solid"
-      disabled={!canCreateMemo || isCreating || locked}
-      onClick={onCreateMemo}
-    >
-      <Plus className="h-4 w-4" />
-      新笔记
-    </Button>
   </div>
 );
 
@@ -1177,15 +1151,6 @@ export const MemoListPane = ({
         )}
 
         {!mobileSearchActive && (
-          <MobileQuickActions
-            canCreateMemo={canCreateMemo && view !== "trash"}
-            isCreating={isCreating}
-            locked={selectionMode}
-            onCreateMemo={onCreateMemo}
-          />
-        )}
-
-        {!mobileSearchActive && (
           <div className="mb-3 flex items-center justify-between gap-3 lg:hidden">
             <div className="flex min-w-0 items-center gap-2">
               <button
@@ -1548,9 +1513,9 @@ export const MemoListPane = ({
           <div className="space-y-4 lg:space-y-0 lg:overflow-hidden lg:rounded-sm lg:border-y lg:border-slate-200 lg:bg-white">
             {memoGroups.map((group) => (
               <section key={group.key}>
-                <div className="sticky top-0 z-[4] flex h-9 items-center justify-between bg-[#f6faf7]/95 px-1 text-sm font-semibold text-slate-400 backdrop-blur lg:border-b lg:border-slate-200 lg:bg-white/95 lg:px-4 lg:text-slate-500">
+                <div className="sticky top-0 z-[4] flex h-7 items-center justify-between bg-[#f6faf7]/90 px-1 text-xs font-medium text-slate-300 backdrop-blur lg:h-9 lg:border-b lg:border-slate-200 lg:bg-white/95 lg:px-4 lg:text-sm lg:font-semibold lg:text-slate-500">
                   <span>{group.label}</span>
-                  <span>{group.items.length}</span>
+                  <span className="text-[11px] font-medium text-slate-300 lg:text-sm lg:font-semibold lg:text-slate-500">{group.items.length}</span>
                 </div>
                 <div className="space-y-3 lg:space-y-0">
                   {group.items.map((memo) => (
