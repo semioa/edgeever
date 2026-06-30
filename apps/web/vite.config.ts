@@ -73,5 +73,43 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: "vendor-react",
+              test: /node_modules[\\/](react|react-dom|scheduler|react-router)[\\/]/,
+              priority: 40,
+            },
+            {
+              name: "vendor-editor",
+              test: /node_modules[\\/](@tiptap|@floating-ui|prosemirror|orderedmap|rope-sequence|linkifyjs|tippy\.js)[\\/]/,
+              priority: 30,
+            },
+            {
+              name: "vendor-query",
+              test: /node_modules[\\/]@tanstack[\\/]react-query[\\/]/,
+              priority: 25,
+            },
+            {
+              name: "vendor-storage",
+              test: /node_modules[\\/](dexie|workbox-window)[\\/]/,
+              priority: 20,
+            },
+            {
+              name: "vendor-ui",
+              test: /node_modules[\\/](@radix-ui|lucide-react|cmdk|vaul|class-variance-authority|clsx|tailwind-merge)[\\/]/,
+              priority: 15,
+            },
+            {
+              name: "vendor",
+              test: /node_modules[\\/]/,
+              priority: 5,
+            },
+          ],
+        },
+      },
+    },
   },
 });
