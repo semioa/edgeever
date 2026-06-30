@@ -1947,7 +1947,7 @@ export const WorkspaceApp = ({
                     onShowGuide={() => setRightView("evernote-migration")}
                   />
                 ) : rightView === "assets" ? (
-                  <AssetsPane onClose={handleCloseAssets} />
+                  <AssetsPane onClose={handleCloseAssets} activeMemo={selectedMemo} />
                 ) : rightView === "evernote-migration" ? (
                   <EvernoteImportGuidePane onClose={() => setRightView("settings")} />
                 ) : (
