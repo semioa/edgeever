@@ -2082,7 +2082,6 @@ export const WorkspaceApp = ({
               <Suspense fallback={<PaneLoadingFallback label={rightPaneLoadingLabel} />}>
                 {rightView === "settings" ? (
                   <SettingsPane
-                    user={user}
                     onClose={handleCloseSettings}
                     imageCompressionEnabled={imageCompressionEnabled}
                     onImageCompressionChange={setImageCompressionEnabled}

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronLeft, Copy, HelpCircle, Image, KeyRound, LogOut, Plus, ShieldCheck, Sparkles, Trash2, UploadCloud, User } from "lucide-react";
-import type { ApiToken, AuthUser } from "@edgeever/shared";
+import type { ApiToken } from "@edgeever/shared";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -68,7 +68,6 @@ const copyTextToClipboard = async (text: string) => {
 };
 
 interface SettingsPaneProps {
-  user: AuthUser | null;
   onClose: () => void;
   imageCompressionEnabled: boolean;
   onImageCompressionChange: (enabled: boolean) => void;
@@ -77,27 +76,6 @@ interface SettingsPaneProps {
   authRequired: boolean;
   onShowGuide?: () => void;
 }
-
-interface ProfileCardProps {
-  user: AuthUser | null;
-}
-
-const ProfileCard = ({ user }: ProfileCardProps) => (
-  <Card className="w-full min-w-0 self-start overflow-hidden border-emerald-100 bg-gradient-to-br from-white to-emerald-50/40 shadow-none">
-    <CardContent className="flex items-center gap-3 p-4">
-      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-base font-bold uppercase text-white shadow-sm shadow-emerald-200">
-        {user?.username?.charAt(0) ?? "U"}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-bold text-slate-900">{user?.username ?? "本地用户"}</div>
-        <div className="mt-1 flex items-center gap-1.5 text-xs font-medium text-slate-500">
-          <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-          在线工作区已连接
-        </div>
-      </div>
-    </CardContent>
-  </Card>
-);
 
 interface PreferenceCardProps {
   imageCompressionEnabled: boolean;
@@ -704,7 +682,6 @@ const SessionCard = ({ authRequired, isLoggingOut, onLogout }: SessionCardProps)
 };
 
 export const SettingsPane = ({
-  user,
   onClose,
   imageCompressionEnabled,
   onImageCompressionChange,
@@ -803,7 +780,6 @@ export const SettingsPane = ({
 
       <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-4 lg:px-6 lg:py-6">
         <div className="mx-auto grid w-full min-w-0 max-w-4xl gap-4">
-          <ProfileCard user={user} />
           <PreferenceCard
             imageCompressionEnabled={imageCompressionEnabled}
             onImageCompressionChange={onImageCompressionChange}
