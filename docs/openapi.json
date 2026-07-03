@@ -377,8 +377,33 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 5000,
-              "default": 5000
+              "maximum": 200,
+              "default": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["updated-desc", "created-desc", "title-asc"],
+              "default": "updated-desc"
+            }
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["all", "tagged", "untagged", "pinned"],
+              "default": "all"
             }
           }
         ],
@@ -399,9 +424,12 @@
                     "totalCount": {
                       "type": "integer",
                       "minimum": 0
+                    },
+                    "nextCursor": {
+                      "type": ["string", "null"]
                     }
                   },
-                  "required": ["memos", "totalCount"]
+                  "required": ["memos", "totalCount", "nextCursor"]
                 }
               }
             }

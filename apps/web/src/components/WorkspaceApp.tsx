@@ -12,7 +12,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Home, Search, UserRound, Plus, ChevronDown, ChevronRight, RefreshCw, X } from "lucide-react";
 import { useLocation, useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
@@ -40,6 +40,8 @@ import type {
   NotebookMoveOption,
   MemoTemplate,
   ShortcutSettings,
+  MemoFilterMode,
+  MemoSortMode,
 } from "@/lib/app-helpers";
 import {
   DEFAULT_MEMO_TITLE,
@@ -138,15 +140,6 @@ const memoToSummary = (memo: MemoDetail): MemoSummary => ({
 
 const cacheMemoDetail = (queryClient: QueryClient, memo: MemoDetail, view: MemoView = memo.isDeleted ? "trash" : "notebook") => {
   queryClient.setQueryData(memoDetailQueryKey(memo.id, view), { memo });
-};
-
-const prependMemoSummaryToList = (queryClient: QueryClient, queryKey: readonly unknown[], memo: MemoDetail) => {
-  const summary = memoToSummary(memo);
-
-  queryClient.setQueryData<{ memos: MemoSummary[]; totalCount?: number }>(queryKey, (current) => ({
-    memos: [summary, ...(current?.memos ?? []).filter((item) => item.id !== memo.id)],
-    totalCount: (current?.totalCount ?? current?.memos.length ?? 0) + 1,
-  }));
 };
 
 const MobileBottomNavButton = ({
@@ -524,6 +517,8 @@ export const WorkspaceApp = ({
   const [noteReplaceFocusToken, setNoteReplaceFocusToken] = useState(0);
   const [memoListWidth, setMemoListWidth] = useState(readMemoListWidthPreference);
   const [search, setSearch] = useState("");
+  const [memoFilterMode, setMemoFilterMode] = useState<MemoFilterMode>("all");
+  const [memoSortMode, setMemoSortMode] = useState<MemoSortMode>("updated-desc");
   const [syncSummary, setSyncSummary] = useState<SyncQueueSummary>(emptySyncQueueSummary);
   const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [isDesktop, setIsDesktop] = useState(isDesktopViewport);
@@ -908,18 +903,40 @@ export const WorkspaceApp = ({
     return () => window.clearInterval(timer);
   }, [runQueuedSync, syncSummary.total]);
 
-  const memosQuery = useQuery({
-    queryKey: ["memos", memoView, selectedNotebookId, search],
-    queryFn: () =>
+  const memosQuery = useInfiniteQuery({
+    queryKey: ["memos", memoView, selectedNotebookId, search, memoFilterMode, memoSortMode],
+    queryFn: ({ pageParam }) =>
       api.listMemos({
         notebookId: memoView === "notebook" ? selectedNotebookId : null,
         q: search,
         trash: memoView === "trash",
+        filter: memoFilterMode,
+        sort: memoSortMode,
+        cursor: pageParam,
       }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
   });
 
-  const memos = memosQuery.data?.memos ?? [];
-  const totalMemoCount = memosQuery.data?.totalCount ?? memos.length;
+  const memos = useMemo(() => {
+    const memoMap = new Map<string, MemoSummary>();
+
+    for (const page of memosQuery.data?.pages ?? []) {
+      for (const memo of page.memos) {
+        memoMap.set(memo.id, memo);
+      }
+    }
+
+    return Array.from(memoMap.values());
+  }, [memosQuery.data?.pages]);
+  const totalMemoCount = memosQuery.data?.pages[0]?.totalCount ?? memos.length;
+  const handleLoadMoreMemos = useCallback(() => {
+    if (!memosQuery.hasNextPage || memosQuery.isFetchingNextPage) {
+      return;
+    }
+
+    void memosQuery.fetchNextPage();
+  }, [memosQuery]);
   const selectedMemoIndex = selectedMemoId ? memos.findIndex((memo) => memo.id === selectedMemoId) : -1;
   const previousMemoId = selectedMemoIndex > 0 ? memos[selectedMemoIndex - 1]?.id : null;
   const nextMemoId =
@@ -988,10 +1005,6 @@ export const WorkspaceApp = ({
         setSelectedNotebookId(targetNotebookId);
       }
       cacheMemoDetail(queryClient, data.memo, "notebook");
-      prependMemoSummaryToList(queryClient, ["memos", "notebook", targetNotebookId, ""], data.memo);
-      if (targetNotebookId !== null) {
-        prependMemoSummaryToList(queryClient, ["memos", "notebook", null, ""], data.memo);
-      }
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: ["memos"] }),
         queryClient.invalidateQueries({ queryKey: ["notebooks"] }),
@@ -1042,17 +1055,8 @@ export const WorkspaceApp = ({
       ]);
 
       const memoIdSet = new Set(memoIds);
-      const previousMemoQueries = queryClient.getQueriesData<{ memos: MemoSummary[]; totalCount?: number }>({ queryKey: ["memos"] });
       const previousMemoDetailQueries = queryClient.getQueriesData<{ memo: MemoDetail }>({ queryKey: ["memo"] });
 
-      queryClient.setQueriesData<{ memos: MemoSummary[]; totalCount?: number }>({ queryKey: ["memos"] }, (current) =>
-        current
-          ? {
-              ...current,
-              memos: current.memos.map((memo) => (memoIdSet.has(memo.id) ? { ...memo, isPinned } : memo)),
-            }
-          : current
-      );
       queryClient.setQueriesData<{ memo: MemoDetail }>({ queryKey: ["memo"] }, (current) =>
         current && memoIdSet.has(current.memo.id)
           ? {
@@ -1061,12 +1065,9 @@ export const WorkspaceApp = ({
           : current
       );
 
-      return { previousMemoQueries, previousMemoDetailQueries };
+      return { previousMemoDetailQueries };
     },
     onError: (_error, _variables, context) => {
-      context?.previousMemoQueries.forEach(([queryKey, data]) => {
-        queryClient.setQueryData(queryKey, data);
-      });
       context?.previousMemoDetailQueries.forEach(([queryKey, data]) => {
         queryClient.setQueryData(queryKey, data);
       });
@@ -1998,12 +1999,19 @@ export const WorkspaceApp = ({
               view={memoView}
               memos={memos}
               totalMemoCount={totalMemoCount}
+              hasMoreMemos={Boolean(memosQuery.hasNextPage)}
+              isLoadingMoreMemos={memosQuery.isFetchingNextPage}
               selectedMemoId={selectedMemoId}
               selectedMemoIds={selectedMemoIds}
               selectionMode={memoSelectionModeActive}
               search={search}
+              filterMode={memoFilterMode}
+              sortMode={memoSortMode}
               mobileSearchActive={mobileSearchActive}
               searchFocusToken={mobileSearchFocusToken}
+              onFilterModeChange={setMemoFilterMode}
+              onSortModeChange={setMemoSortMode}
+              onLoadMoreMemos={handleLoadMoreMemos}
               canCreateMemo={canCreateMemo}
               isLoading={memosQuery.isLoading}
               isRefreshing={memosQuery.isFetching}

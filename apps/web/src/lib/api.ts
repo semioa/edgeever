@@ -12,6 +12,7 @@ import type {
   TagSummary,
   TiptapDoc,
 } from "@edgeever/shared";
+import type { MemoFilterMode, MemoSortMode } from "./app-helpers";
 
 type ListNotebooksResponse = {
   notebooks: Notebook[];
@@ -20,6 +21,7 @@ type ListNotebooksResponse = {
 type ListMemosResponse = {
   memos: MemoSummary[];
   totalCount: number;
+  nextCursor: string | null;
 };
 
 type ListMemoRevisionsResponse = {
@@ -155,7 +157,15 @@ export const api = {
       method: "DELETE",
     }),
 
-  listMemos: (params: { notebookId?: string | null; q?: string; trash?: boolean }) => {
+  listMemos: (params: {
+    notebookId?: string | null;
+    q?: string;
+    trash?: boolean;
+    sort?: MemoSortMode;
+    filter?: MemoFilterMode;
+    cursor?: string | null;
+    limit?: number;
+  }) => {
     const search = new URLSearchParams();
 
     if (params.notebookId) {
@@ -168,6 +178,22 @@ export const api = {
 
     if (params.trash) {
       search.set("trash", "1");
+    }
+
+    if (params.sort) {
+      search.set("sort", params.sort);
+    }
+
+    if (params.filter && params.filter !== "all") {
+      search.set("filter", params.filter);
+    }
+
+    if (params.cursor) {
+      search.set("cursor", params.cursor);
+    }
+
+    if (params.limit) {
+      search.set("limit", String(params.limit));
     }
 
     return request<ListMemosResponse>(`/api/v1/memos?${search.toString()}`);

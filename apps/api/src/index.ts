@@ -91,6 +91,19 @@ type MemoSummaryRow = {
   revision: number;
 };
 
+type MemoListSortMode = "updated-desc" | "created-desc" | "title-asc";
+type MemoListFilterMode = "all" | "tagged" | "untagged" | "pinned";
+
+type MemoListCursor = {
+  sort: MemoListSortMode;
+  id: string;
+  pinned?: number;
+  updatedAt?: string;
+  createdAt?: string;
+  deletedAt?: string | null;
+  title?: string;
+};
+
 type MemoDetailRow = MemoSummaryRow & {
   content_json: string;
   content_markdown: string;
@@ -188,6 +201,9 @@ type ResourceStatsRow = {
 type AppContext = Context<{ Bindings: Bindings; Variables: { auth: AuthContext } }>;
 
 const SESSION_COOKIE = "edgeever_session";
+const DEFAULT_MEMO_LIST_LIMIT = 100;
+const MAX_MEMO_LIST_LIMIT = 200;
+const UNTITLED_MEMO_TITLE = "无标题笔记";
 const PASSWORD_HASH_ALGORITHM = "pbkdf2-sha256";
 const PASSWORD_HASH_ITERATIONS = 100_000;
 const PASSWORD_HASH_BYTES = 32;
@@ -696,14 +712,73 @@ app.get("/api/v1/memos", async (c) => {
   const notebookId = c.req.query("notebookId");
   const q = c.req.query("q")?.trim();
   const includeTrash = c.req.query("trash") === "1";
-  const limit = clampNumber(Number(c.req.query("limit") ?? 5000), 1, 5000);
+  const sort = normalizeMemoListSort(c.req.query("sort"));
+  const filter = normalizeMemoListFilter(c.req.query("filter"));
+  const limit = clampNumber(Number(c.req.query("limit") ?? DEFAULT_MEMO_LIST_LIMIT), 1, MAX_MEMO_LIST_LIMIT);
+  const cursor = decodeMemoListCursor(c.req.query("cursor"), sort);
   const deletedClause = includeTrash ? "m.is_deleted = 1" : "m.is_deleted = 0";
+  const titleSortExpression = `LOWER(COALESCE(NULLIF(m.title, ''), '${UNTITLED_MEMO_TITLE}'))`;
+  const baseConditions = [deletedClause];
+  const baseBinds: unknown[] = [];
+
+  if (notebookId) {
+    baseConditions.push("m.notebook_id = ?");
+    baseBinds.push(notebookId);
+  }
+
+  if (filter === "tagged") {
+    baseConditions.push("m.tags_json <> '[]'");
+  } else if (filter === "untagged") {
+    baseConditions.push("m.tags_json = '[]'");
+  } else if (filter === "pinned") {
+    baseConditions.push("m.is_pinned = 1");
+  }
+
+  const getOrderBy = () => {
+    if (includeTrash) {
+      return "m.deleted_at DESC, m.id DESC";
+    }
+
+    if (sort === "created-desc") {
+      return "m.is_pinned DESC, m.created_at DESC, m.id DESC";
+    }
+
+    if (sort === "title-asc") {
+      return `m.is_pinned DESC, ${titleSortExpression} ASC, m.updated_at DESC, m.id DESC`;
+    }
+
+    return "m.is_pinned DESC, m.updated_at DESC, m.id DESC";
+  };
+
+  const cursorConditions = [...baseConditions];
+  const cursorBinds = [...baseBinds];
+
+  if (cursor) {
+    if (includeTrash) {
+      cursorConditions.push("(m.deleted_at < ? OR (m.deleted_at = ? AND m.id < ?))");
+      cursorBinds.push(cursor.deletedAt ?? "", cursor.deletedAt ?? "", cursor.id);
+    } else if (sort === "created-desc") {
+      cursorConditions.push("(m.is_pinned < ? OR (m.is_pinned = ? AND (m.created_at < ? OR (m.created_at = ? AND m.id < ?))))");
+      cursorBinds.push(cursor.pinned ?? 0, cursor.pinned ?? 0, cursor.createdAt ?? "", cursor.createdAt ?? "", cursor.id);
+    } else if (sort === "title-asc") {
+      cursorConditions.push(
+        `(m.is_pinned < ? OR (m.is_pinned = ? AND (${titleSortExpression} > ? OR (${titleSortExpression} = ? AND (m.updated_at < ? OR (m.updated_at = ? AND m.id < ?))))))`
+      );
+      cursorBinds.push(cursor.pinned ?? 0, cursor.pinned ?? 0, cursor.title ?? "", cursor.title ?? "", cursor.updatedAt ?? "", cursor.updatedAt ?? "", cursor.id);
+    } else {
+      cursorConditions.push("(m.is_pinned < ? OR (m.is_pinned = ? AND (m.updated_at < ? OR (m.updated_at = ? AND m.id < ?))))");
+      cursorBinds.push(cursor.pinned ?? 0, cursor.pinned ?? 0, cursor.updatedAt ?? "", cursor.updatedAt ?? "", cursor.id);
+    }
+  }
+
+  const pageLimit = limit + 1;
 
   if (q) {
     const ftsQuery = toFtsQuery(q);
     const likeQuery = `%${escapeLike(q)}%`;
 
     if (ftsQuery) {
+      const searchPrefix = [ftsQuery, likeQuery, likeQuery, likeQuery];
       const [rows, totalRow] = await Promise.all([
         c.env.DB.prepare(
           `WITH raw_matches(memo_id, rank) AS (
@@ -726,16 +801,15 @@ app.get("/api/v1/memos", async (c) => {
              GROUP BY memo_id
            )
            SELECT m.id, m.notebook_id, m.title, m.excerpt, m.tags_json, m.is_pinned,
-                  m.is_archived, m.is_deleted, m.created_at, m.updated_at, m.deleted_at, c.revision
+                  m.is_archived, m.is_deleted, m.created_at, m.updated_at, m.deleted_at, mc.revision
            FROM search_matches s
            INNER JOIN memos m ON m.id = s.memo_id
-           INNER JOIN memo_contents c ON c.memo_id = m.id
-           WHERE ${deletedClause}
-             AND (? IS NULL OR m.notebook_id = ?)
-           ORDER BY s.rank ASC, m.is_pinned DESC, m.updated_at DESC
+           INNER JOIN memo_contents mc ON mc.memo_id = m.id
+           WHERE ${cursorConditions.join(" AND ")}
+           ORDER BY ${getOrderBy()}
            LIMIT ?`
         )
-          .bind(ftsQuery, likeQuery, likeQuery, likeQuery, notebookId ?? null, notebookId ?? null, limit)
+          .bind(...searchPrefix, ...cursorBinds, pageLimit)
           .all<MemoSummaryRow>(),
         c.env.DB.prepare(
           `WITH raw_matches(memo_id) AS (
@@ -760,41 +834,75 @@ app.get("/api/v1/memos", async (c) => {
            SELECT COUNT(*) AS count
            FROM search_matches s
            INNER JOIN memos m ON m.id = s.memo_id
-           WHERE ${deletedClause}
-             AND (? IS NULL OR m.notebook_id = ?)`
+           WHERE ${baseConditions.join(" AND ")}`
         )
-          .bind(ftsQuery, likeQuery, likeQuery, likeQuery, notebookId ?? null, notebookId ?? null)
+          .bind(...searchPrefix, ...baseBinds)
           .first<{ count: number }>(),
       ]);
 
-      return c.json({ memos: rows.results.map(mapMemoSummary), totalCount: totalRow?.count ?? rows.results.length });
+      const page = rows.results.slice(0, limit);
+      const nextCursor = rows.results.length > limit ? encodeMemoListCursor(page[page.length - 1], sort, includeTrash) : null;
+
+      return c.json({ memos: page.map(mapMemoSummary), totalCount: totalRow?.count ?? page.length, nextCursor });
     }
+
+    const searchConditions = [...baseConditions, "(m.title LIKE ? ESCAPE '\\' OR mc.content_text LIKE ? ESCAPE '\\' OR m.tags_json LIKE ? ESCAPE '\\')"];
+    const searchBinds = [...baseBinds, likeQuery, likeQuery, likeQuery];
+    const searchCursorConditions = [...cursorConditions, "(m.title LIKE ? ESCAPE '\\' OR mc.content_text LIKE ? ESCAPE '\\' OR m.tags_json LIKE ? ESCAPE '\\')"];
+    const searchCursorBinds = [...cursorBinds, likeQuery, likeQuery, likeQuery];
+    const [rows, totalRow] = await Promise.all([
+      c.env.DB.prepare(
+        `SELECT m.id, m.notebook_id, m.title, m.excerpt, m.tags_json, m.is_pinned,
+                m.is_archived, m.is_deleted, m.created_at, m.updated_at, m.deleted_at, mc.revision
+         FROM memos m
+         INNER JOIN memo_contents mc ON mc.memo_id = m.id
+         WHERE ${searchCursorConditions.join(" AND ")}
+         ORDER BY ${getOrderBy()}
+         LIMIT ?`
+      )
+        .bind(...searchCursorBinds, pageLimit)
+        .all<MemoSummaryRow>(),
+      c.env.DB.prepare(
+        `SELECT COUNT(*) AS count
+         FROM memos m
+         INNER JOIN memo_contents mc ON mc.memo_id = m.id
+         WHERE ${searchConditions.join(" AND ")}`
+      )
+        .bind(...searchBinds)
+        .first<{ count: number }>(),
+    ]);
+
+    const page = rows.results.slice(0, limit);
+    const nextCursor = rows.results.length > limit ? encodeMemoListCursor(page[page.length - 1], sort, includeTrash) : null;
+
+    return c.json({ memos: page.map(mapMemoSummary), totalCount: totalRow?.count ?? page.length, nextCursor });
   }
 
   const [rows, totalRow] = await Promise.all([
     c.env.DB.prepare(
       `SELECT m.id, m.notebook_id, m.title, m.excerpt, m.tags_json, m.is_pinned,
-              m.is_archived, m.is_deleted, m.created_at, m.updated_at, m.deleted_at, c.revision
+              m.is_archived, m.is_deleted, m.created_at, m.updated_at, m.deleted_at, mc.revision
        FROM memos m
-       INNER JOIN memo_contents c ON c.memo_id = m.id
-       WHERE ${deletedClause}
-         AND (? IS NULL OR m.notebook_id = ?)
-       ORDER BY ${includeTrash ? "m.deleted_at DESC," : "m.is_pinned DESC,"} m.updated_at DESC
+       INNER JOIN memo_contents mc ON mc.memo_id = m.id
+       WHERE ${cursorConditions.join(" AND ")}
+       ORDER BY ${getOrderBy()}
        LIMIT ?`
     )
-      .bind(notebookId ?? null, notebookId ?? null, limit)
+      .bind(...cursorBinds, pageLimit)
       .all<MemoSummaryRow>(),
     c.env.DB.prepare(
       `SELECT COUNT(*) AS count
        FROM memos m
-       WHERE ${deletedClause}
-         AND (? IS NULL OR m.notebook_id = ?)`
+       WHERE ${baseConditions.join(" AND ")}`
     )
-      .bind(notebookId ?? null, notebookId ?? null)
+      .bind(...baseBinds)
       .first<{ count: number }>(),
   ]);
 
-  return c.json({ memos: rows.results.map(mapMemoSummary), totalCount: totalRow?.count ?? rows.results.length });
+  const page = rows.results.slice(0, limit);
+  const nextCursor = rows.results.length > limit ? encodeMemoListCursor(page[page.length - 1], sort, includeTrash) : null;
+
+  return c.json({ memos: page.map(mapMemoSummary), totalCount: totalRow?.count ?? page.length, nextCursor });
 });
 
 app.post("/api/v1/memos", zValidator("json", MemoCreateSchema), async (c) => {
@@ -3934,12 +4042,71 @@ const normalizeMemoTitle = (value: string | null | undefined) => {
   return title || DEFAULT_MEMO_TITLE;
 };
 
+const normalizeMemoListSort = (value: string | undefined): MemoListSortMode =>
+  value === "created-desc" || value === "title-asc" ? value : "updated-desc";
+
+const normalizeMemoListFilter = (value: string | undefined): MemoListFilterMode =>
+  value === "tagged" || value === "untagged" || value === "pinned" ? value : "all";
+
 const clampNumber = (value: number, min: number, max: number) => {
   if (Number.isNaN(value)) {
     return min;
   }
 
   return Math.min(Math.max(value, min), max);
+};
+
+const encodeMemoListCursor = (memo: MemoSummaryRow, sort: MemoListSortMode, includeTrash: boolean) => {
+  const cursor: MemoListCursor = {
+    sort,
+    id: memo.id,
+  };
+
+  if (includeTrash) {
+    cursor.deletedAt = memo.deleted_at;
+  } else {
+    cursor.pinned = memo.is_pinned;
+  }
+
+  if (sort === "created-desc") {
+    cursor.createdAt = memo.created_at;
+  } else if (sort === "title-asc") {
+    cursor.title = normalizeMemoTitle(memo.title).toLocaleLowerCase();
+    cursor.updatedAt = memo.updated_at;
+  } else {
+    cursor.updatedAt = memo.updated_at;
+  }
+
+  const bytes = new TextEncoder().encode(JSON.stringify(cursor));
+  let binary = "";
+
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+};
+
+const decodeMemoListCursor = (value: string | undefined, sort: MemoListSortMode): MemoListCursor | null => {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    const cursor = JSON.parse(new TextDecoder().decode(bytes)) as Partial<MemoListCursor>;
+
+    if (cursor.sort !== sort || typeof cursor.id !== "string") {
+      return null;
+    }
+
+    return cursor as MemoListCursor;
+  } catch {
+    return null;
+  }
 };
 
 const toFtsQuery = (value: string) => {

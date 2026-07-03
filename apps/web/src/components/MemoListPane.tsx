@@ -61,8 +61,6 @@ import type { SyncQueueSummary } from "@/lib/sync-queue";
 import {
   MEMO_FILTER_OPTIONS,
   MEMO_SORT_OPTIONS,
-  filterMemos,
-  sortMemos,
   getNotebookMoveOptions,
   readMemoListDensityPreference,
   writeMemoListDensityPreference,
@@ -305,6 +303,8 @@ export const MemoListPane = ({
   notebook,
   memos,
   totalMemoCount,
+  hasMoreMemos,
+  isLoadingMoreMemos,
   selectedMemoId,
   selectedMemoIds,
   selectionMode,
@@ -318,6 +318,11 @@ export const MemoListPane = ({
   search,
   searchFocusToken,
   mobileSearchActive,
+  filterMode,
+  sortMode,
+  onFilterModeChange,
+  onSortModeChange,
+  onLoadMoreMemos,
   onOpenMemo,
   onDeleteMemo,
   onRestoreMemo,
@@ -366,6 +371,8 @@ export const MemoListPane = ({
   notebook: Notebook | null;
   memos: MemoSummary[];
   totalMemoCount: number;
+  hasMoreMemos: boolean;
+  isLoadingMoreMemos: boolean;
   selectedMemoId: string | null;
   selectedMemoIds: Set<string>;
   selectionMode: boolean;
@@ -379,6 +386,11 @@ export const MemoListPane = ({
   search: string;
   searchFocusToken: number;
   mobileSearchActive: boolean;
+  filterMode: MemoFilterMode;
+  sortMode: MemoSortMode;
+  onFilterModeChange: (filterMode: MemoFilterMode) => void;
+  onSortModeChange: (sortMode: MemoSortMode) => void;
+  onLoadMoreMemos: () => void;
   onOpenMemo: (memoId: string) => void;
   onDeleteMemo: (memoId: string) => void;
   onRestoreMemo: (memoId: string) => void;
@@ -417,17 +429,13 @@ export const MemoListPane = ({
 }) => {
   const [memoContextMenu, setMemoContextMenu] = useState<MemoContextMenuState | null>(null);
   const [contextMoveOpen, setContextMoveOpen] = useState(false);
-  const [filterMode, setFilterMode] = useState<MemoFilterMode>("all");
-  const [sortMode, setSortMode] = useState<MemoSortMode>("updated-desc");
   const [listDensity, setListDensity] = useState<MemoListDensity>(() => readMemoListDensityPreference());
   const [lastSelectedMemoId, setLastSelectedMemoId] = useState<string | null>(null);
   const [moveTargetNotebookId, setMoveTargetNotebookId] = useState("");
 
   const filterOptions = MEMO_FILTER_OPTIONS;
   const mobileFilterOptions = useMemo(() => filterOptions.filter((option: any) => option.value !== "all"), [filterOptions]);
-  const filteredMemos = useMemo(() => filterMemos(memos, filterMode), [filterMode, memos]);
-  const sortedMemos = useMemo(() => sortMemos(filteredMemos, sortMode, view !== "trash"), [filteredMemos, sortMode, view]);
-  const visibleMemoIds = useMemo(() => sortedMemos.map((memo) => memo.id), [sortedMemos]);
+  const visibleMemoIds = useMemo(() => memos.map((memo) => memo.id), [memos]);
   const moveNotebookOptions = useMemo(() => getNotebookMoveOptions(notebooks), [notebooks]);
   const selectedMemosInList = useMemo(() => memos.filter((memo) => selectedMemoIds.has(memo.id)), [memos, selectedMemoIds]);
 
@@ -447,7 +455,7 @@ export const MemoListPane = ({
 
   const listTitle = view === "trash" ? "回收站" : notebook?.name ?? "全部笔记";
   const listContextLabel = view === "trash" ? "已删除笔记" : notebook ? "当前笔记本" : "所有笔记本";
-  const listCountLabel = `${filteredMemos.length}${filterMode !== "all" || filteredMemos.length !== totalMemoCount ? ` / ${totalMemoCount}` : ""} ${
+  const listCountLabel = `${memos.length}${memos.length !== totalMemoCount ? ` / ${totalMemoCount}` : ""} ${
     view === "trash" ? "条已删除" : "条笔记"
   }`;
   const selectionCountLabel = getSelectionCountLabel(selectedMemoIds.size);
@@ -510,9 +518,32 @@ export const MemoListPane = ({
 
   useEffect(() => {
     if (!filterOptions.some((option) => option.value === filterMode)) {
-      setFilterMode("all");
+      onFilterModeChange("all");
     }
-  }, [filterMode, filterOptions]);
+  }, [filterMode, filterOptions, onFilterModeChange]);
+
+  useEffect(() => {
+    if (!hasMoreMemos || isLoadingMoreMemos) {
+      return;
+    }
+
+    const scrollContainer = listScrollRef.current;
+    if (!scrollContainer) {
+      return;
+    }
+
+    const handleScroll = () => {
+      const remaining = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight;
+
+      if (remaining < 480) {
+        onLoadMoreMemos();
+      }
+    };
+
+    handleScroll();
+    scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
+    return () => scrollContainer.removeEventListener("scroll", handleScroll);
+  }, [hasMoreMemos, isLoadingMoreMemos, onLoadMoreMemos]);
 
   useEffect(() => {
     const scrollContainer = listScrollRef.current;
@@ -746,14 +777,14 @@ export const MemoListPane = ({
 
   const handleResetListConstraints = () => {
     onClearSelection();
-    setFilterMode("all");
+    onFilterModeChange("all");
     onSearch("");
     focusSearchInput();
   };
 
   const handleFilterModeChange = (value: MemoFilterMode) => {
     onClearSelection();
-    setFilterMode(value);
+    onFilterModeChange(value);
   };
 
   const handleListDensityChange = (value: MemoListDensity) => {
@@ -1016,7 +1047,7 @@ export const MemoListPane = ({
                       "flex h-9 w-full items-center gap-2 px-3 text-left text-sm cursor-pointer outline-none",
                       sortMode === option.value ? "bg-slate-100 text-slate-900" : "text-slate-700 hover:bg-slate-50"
                     )}
-                    onClick={() => setSortMode(option.value)}
+                    onClick={() => onSortModeChange(option.value)}
                   >
                     <span className="min-w-0 flex-1 truncate">{option.label}</span>
                   </DropdownMenuItem>
@@ -1171,7 +1202,7 @@ export const MemoListPane = ({
         {hasListConstraint && (
           <div className="mt-3 flex min-h-8 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-500">
             <span className="min-w-0 flex-1 truncate">
-              {search.trim() ? `搜索「${search.trim()}」` : `筛选：${activeFilterLabel}`} · {filteredMemos.length} 条
+              {search.trim() ? `搜索「${search.trim()}」` : `筛选：${activeFilterLabel}`} · {totalMemoCount} 条
             </span>
             <button
               className="shrink-0 font-semibold text-slate-600 transition hover:text-slate-950"
@@ -1201,7 +1232,7 @@ export const MemoListPane = ({
               重新拉取
             </Button>
           </div>
-        ) : filteredMemos.length === 0 ? (
+        ) : memos.length === 0 ? (
           <div className="rounded-md border border-dashed border-slate-300 bg-white px-4 py-9 text-center">
             <div className="text-sm font-semibold text-slate-800">
               {memos.length === 0 ? (view === "trash" ? "回收站为空" : "暂无笔记") : "没有符合筛选的笔记"}
@@ -1223,7 +1254,7 @@ export const MemoListPane = ({
         ) : (
           <div className="space-y-4 lg:space-y-0 lg:overflow-hidden lg:rounded-sm lg:border-y lg:border-slate-200 lg:bg-white">
             <div className="space-y-3 lg:space-y-0">
-              {sortedMemos.map((memo) => (
+              {memos.map((memo) => (
                 <MemoCard
                   key={memo.id}
                   memo={memo}
@@ -1245,6 +1276,11 @@ export const MemoListPane = ({
                 />
               ))}
             </div>
+            {isLoadingMoreMemos && (
+              <div className="border-t border-slate-100 px-4 py-3 text-center text-xs font-medium text-slate-500">
+                正在加载更多笔记
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1425,7 +1461,7 @@ export const MemoListPane = ({
               handleListDensityChange(value);
             }}
             onSortModeChange={(value) => {
-              setSortMode(value);
+              onSortModeChange(value);
             }}
           />
         </Suspense>
