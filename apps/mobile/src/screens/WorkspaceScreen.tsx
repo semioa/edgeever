@@ -44,7 +44,6 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
-  Settings,
   ShieldCheck,
   Sparkles,
   Tag,
@@ -863,6 +862,7 @@ export const WorkspaceScreen = () => {
           onMemoListDensityChange={handleMemoListDensityChange}
           onOpenActions={() => setNotesActionsOpen(true)}
           onOpenNotebookPicker={() => setNotebookPickerOpen(true)}
+          onOpenSearch={() => setActiveView("search")}
           onOpenTemplates={() => setTemplatesOpen(true)}
           onMemoPress={handleMemoPress}
           onMemoLongPress={(memo) => setMemoActionsMemo(memo)}
@@ -894,6 +894,8 @@ export const WorkspaceScreen = () => {
       {activeView === "account" ? <AccountView instance={session?.baseUrl ?? ""} userName={session?.user?.username ?? "owner"} onSignOut={signOut} /> : null}
       {activeView === "settings" ? (
         <SettingsView
+          instance={session?.baseUrl ?? ""}
+          userName={session?.user?.username ?? "owner"}
           notebookCount={notebooks.length}
           memoCount={memoCount}
           onOpenAdvancedPlay={() => setAdvancedPlayOpen(true)}
@@ -913,6 +915,7 @@ export const WorkspaceScreen = () => {
           onLocalePreferenceChange={handleLocalePreferenceChange}
           imageCompressionEnabled={imageCompressionEnabled}
           onImageCompressionChange={handleImageCompressionChange}
+          onSignOut={signOut}
         />
       ) : null}
 
@@ -1119,22 +1122,13 @@ export const WorkspaceScreen = () => {
           label="笔记"
           onPress={() => setActiveView("notes")}
         />
-        <BottomNavItem
-          active={activeView === "search"}
-          icon={<Search color={activeView === "search" ? "#0f172a" : "#64748b"} size={20} />}
-          label="搜索"
-          onPress={() => setActiveView("search")}
-        />
-        <BottomNavItem
-          active={activeView === "account"}
-          icon={<UserRound color={activeView === "account" ? "#0f172a" : "#64748b"} size={20} />}
-          label="账户"
-          onPress={() => setActiveView("account")}
-        />
+        <Pressable accessibilityRole="button" onPress={() => setCreateOpen(true)} style={styles.bottomCreateButton}>
+          <Plus color="#ffffff" size={28} />
+        </Pressable>
         <BottomNavItem
           active={activeView === "settings"}
-          icon={<Settings color={activeView === "settings" ? "#0f172a" : "#64748b"} size={20} />}
-          label="设置"
+          icon={<UserRound color={activeView === "settings" ? "#0f172a" : "#64748b"} size={20} />}
+          label="我的"
           onPress={() => setActiveView("settings")}
         />
       </View>
@@ -1185,6 +1179,7 @@ const NotesView = ({
   onMemoListDensityChange,
   onOpenActions,
   onOpenNotebookPicker,
+  onOpenSearch,
   onMemoLongPress,
   onMemoPress,
   onOpenTemplates,
@@ -1217,6 +1212,7 @@ const NotesView = ({
   onMemoListDensityChange: (density: MobileMemoListDensity) => void;
   onOpenActions: () => void;
   onOpenNotebookPicker: () => void;
+  onOpenSearch: () => void;
   onMemoLongPress: (memo: MemoSummary) => void;
   onMemoPress: (memoId: string) => void;
   onOpenTemplates: () => void;
@@ -1277,6 +1273,9 @@ const NotesView = ({
             <Folder color="#0f172a" size={18} />
           </Pressable>
         ) : null}
+        <Pressable accessibilityRole="button" onPress={onOpenSearch} style={styles.secondaryIconButton}>
+          <Search color="#0f172a" size={18} />
+        </Pressable>
         <Pressable accessibilityRole="button" onPress={onOpenActions} style={styles.secondaryIconButton}>
           <MoreHorizontal color="#0f172a" size={18} />
         </Pressable>
@@ -1702,6 +1701,7 @@ const AccountView = ({ instance, userName, onSignOut }: { instance: string; user
 
 const SettingsView = ({
   imageCompressionEnabled,
+  instance,
   isSyncingQueue,
   localePreference,
   memoCount,
@@ -1717,11 +1717,14 @@ const SettingsView = ({
   onOpenSyncQueue,
   onOpenTagsManager,
   onOpenTemplates,
+  onSignOut,
   onSyncQueuedChanges,
   syncQueueMessage,
   syncQueueSummary,
+  userName,
 }: {
   imageCompressionEnabled: boolean;
+  instance: string;
   isSyncingQueue: boolean;
   localePreference: MobileLocaleMode;
   memoCount: number;
@@ -1737,12 +1740,16 @@ const SettingsView = ({
   onOpenSyncQueue: () => void;
   onOpenTagsManager: () => void;
   onOpenTemplates: () => void;
+  onSignOut: () => void;
   onSyncQueuedChanges: () => void;
   syncQueueMessage: string;
   syncQueueSummary: MobileSyncQueueSummary;
+  userName: string;
 }) => (
   <ScrollView contentContainerStyle={styles.panelList} style={styles.viewBody}>
-    <Text style={styles.sectionTitle}>设置</Text>
+    <Text style={styles.sectionTitle}>我的</Text>
+    <PanelRow label="当前用户" value={userName} />
+    <PanelRow label="实例地址" value={instance} />
     <Pressable onPress={onOpenNotebookManager}>
       <PanelRow label="笔记本管理" value="创建、重命名、删除" />
     </Pressable>
@@ -1802,6 +1809,10 @@ const SettingsView = ({
     </View>
     <SyncQueuePanel isSyncing={isSyncingQueue} message={syncQueueMessage} onOpen={onOpenSyncQueue} onSync={onSyncQueuedChanges} summary={syncQueueSummary} />
     <PanelRow label="富文本编辑器" value="已接入 PWA TipTap WebView" />
+    <Pressable onPress={onSignOut} style={styles.dangerButton}>
+      <LogOut color="#b91c1c" size={18} />
+      <Text style={styles.dangerButtonText}>退出登录</Text>
+    </Pressable>
   </ScrollView>
 );
 
@@ -6678,10 +6689,26 @@ const styles = StyleSheet.create({
     bottom: 0,
     flexDirection: "row",
     height: 64,
-    justifyContent: "space-around",
+    justifyContent: "space-between",
     left: 0,
+    paddingHorizontal: 44,
     position: "absolute",
     right: 0,
+  },
+  bottomCreateButton: {
+    alignItems: "center",
+    backgroundColor: "#10b981",
+    borderColor: "#ffffff",
+    borderRadius: 28,
+    borderWidth: 5,
+    height: 56,
+    justifyContent: "center",
+    marginTop: -28,
+    shadowColor: "#10b981",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.28,
+    shadowRadius: 18,
+    width: 56,
   },
   selectionBar: {
     backgroundColor: "#ffffff",
