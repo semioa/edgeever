@@ -19,6 +19,7 @@
     "@tanstack/react-query": "latest",
     "expo": "latest",
     "expo-clipboard": "~57.0.0",
+    "expo-constants": "~57.0.3",
     "expo-document-picker": "~57.0.0",
     "expo-image-manipulator": "~57.0.2",
     "expo-router": "latest",

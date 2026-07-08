@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
+import Constants from "expo-constants";
 import * as DocumentPicker from "expo-document-picker";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import type { MemoFilterMode, MemoSortMode } from "@edgeever/client";
@@ -106,7 +107,7 @@ import {
 
 const ALL_NOTES_ID = "all";
 const DEFAULT_MEMO_TITLE = "无标题笔记";
-const MOBILE_APP_VERSION = "0.1.2";
+const MOBILE_APP_VERSION = Constants.expoConfig?.version ?? "0.1.2";
 const GITHUB_REPOSITORY_URL = "https://github.com/tianma-if/edgeever";
 const EVERNOTE_IMPORT_SCRIPT_URL =
   "https://raw.githubusercontent.com/tianma-if/edgeever/main/scripts/import-evernote-enex-via-mcp.mjs";
@@ -157,6 +158,19 @@ const MEMO_TEMPLATES: MemoTemplate[] = [
     tags: ["template", "daily"],
   },
 ];
+
+const formatExecutionEnvironment = (environment: string | null | undefined) => {
+  switch (environment) {
+    case "standalone":
+      return "独立安装包";
+    case "storeClient":
+      return "Expo Go / 开发客户端";
+    case "bare":
+      return "Bare React Native";
+    default:
+      return environment || "未知";
+  }
+};
 const ALL_TOKEN_SCOPES = [
   "read:notebooks",
   "write:notebooks",
@@ -2809,10 +2823,23 @@ const SystemInfoModal = ({
   visible: boolean;
 }) => {
   const [copied, setCopied] = useState(false);
+  const expoConfig = Constants.expoConfig;
+  const expoExtra = expoConfig?.extra as { eas?: { projectId?: string } } | undefined;
+  const nativeIdentifier = Platform.select({
+    android: expoConfig?.android?.package,
+    ios: expoConfig?.ios?.bundleIdentifier,
+    default: expoConfig?.slug,
+  });
   const infoItems = [
     { label: "版本", value: `v${MOBILE_APP_VERSION}` },
+    { label: "构建", value: __DEV__ ? "development" : "production" },
     { label: "平台", value: Platform.OS },
     { label: "平台版本", value: String(Platform.Version) },
+    { label: "安装形态", value: formatExecutionEnvironment(Constants.executionEnvironment) },
+    { label: "应用标识", value: nativeIdentifier || "未知" },
+    { label: "Expo Owner", value: expoConfig?.owner || "未设置" },
+    { label: "Expo Slug", value: expoConfig?.slug || "未知" },
+    { label: "EAS Project ID", value: Constants.easConfig?.projectId || expoExtra?.eas?.projectId || "未连接" },
     { label: "实例地址", value: baseUrl || "未连接" },
     { label: "笔记本数量", value: String(notebookCount) },
     { label: "笔记总数", value: String(memoCount) },
