@@ -353,6 +353,15 @@ export const WorkspaceScreen = () => {
     setSelectedMemoId(memoId);
   };
 
+  const handleSearchMemoPress = (memo: MemoSummary) => {
+    setActiveView("notes");
+    setMemoView(memo.isDeleted ? "trash" : "notebook");
+    if (!memo.isDeleted) {
+      setActiveNotebookId(memo.notebookId);
+    }
+    setSelectedMemoId(memo.id);
+  };
+
   const toggleSelectedMemo = (memoId: string) => {
     setSelectionMode(true);
     setSelectedMemoIds((current) => {
@@ -873,7 +882,7 @@ export const WorkspaceScreen = () => {
         <SearchView
           isLoading={searchQuery.isFetching}
           isRefreshing={isRefreshing}
-          onMemoPress={handleMemoPress}
+          onMemoPress={handleSearchMemoPress}
           onRefresh={refresh}
           results={searchResults}
           searchText={searchText}
@@ -1591,7 +1600,7 @@ const SearchView = ({
 }: {
   isLoading: boolean;
   isRefreshing: boolean;
-  onMemoPress: (memoId: string) => void;
+  onMemoPress: (memo: MemoSummary) => void;
   onRefresh: () => void;
   results: MemoSummary[];
   searchText: string;
@@ -1630,7 +1639,12 @@ const SearchView = ({
         isRefreshing={isRefreshing}
         listDensity="preview"
         memos={results}
-        onMemoPress={onMemoPress}
+        onMemoPress={(memoId) => {
+          const memo = results.find((item) => item.id === memoId);
+          if (memo) {
+            onMemoPress(memo);
+          }
+        }}
         onRefresh={onRefresh}
       />
     ) : (
