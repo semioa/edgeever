@@ -363,6 +363,14 @@ input {
   padding-left: 1.4em;
 }
 
+.edgeever-mobile-tiptap-content ul {
+  list-style-type: disc;
+}
+
+.edgeever-mobile-tiptap-content ol {
+  list-style-type: decimal;
+}
+
 .edgeever-mobile-tiptap-content blockquote {
   border-left: 3px solid #cbd5e1;
   color: #475569;

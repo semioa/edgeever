@@ -211,8 +211,8 @@ const PASSWORD_HASH_ITERATIONS = 100_000;
 const PASSWORD_HASH_BYTES = 32;
 const PASSWORD_SALT_BYTES = 16;
 const SESSION_TOKEN_BYTES = 32;
-const DEFAULT_SESSION_TTL_DAYS = 5 * 365;
-const MAX_SESSION_TTL_DAYS = 5 * 365;
+const DEFAULT_SESSION_TTL_DAYS = 400;
+const MAX_SESSION_TTL_DAYS = 400;
 const DEFAULT_R2_BUCKET_NAME = "edgeever-resources";
 const DEMO_SEED_NOTEBOOKS = [
   { id: "nb_inbox", parentId: null, name: "等待分类", slug: "inbox", icon: "notebook", color: "#0f766e", sortOrder: 10 },
