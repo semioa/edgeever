@@ -1,0 +1,58 @@
+name: Sync Upstream
+
+# Keeps this fork in sync with the upstream EdgeEver repository so product
+# updates can be pulled in automatically. Runs on a daily schedule and can
+# also be triggered manually from the Actions tab.
+
+on:
+  schedule:
+    - cron: "23 4 * * *" # daily at 04:23 UTC (off-peak, low collision)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          ref: main
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          if ! git remote get-url upstream >/dev/null 2>&1; then
+            git remote add upstream https://github.com/tianma-if/edgeever.git
+          fi
+          git fetch upstream --tags
+
+      - name: Merge upstream/main (prefer upstream on conflict)
+        id: merge
+        run: |
+          set +e
+          git merge upstream/main --no-edit -X theirs
+          status=$?
+          if [ $status -ne 0 ]; then
+            git merge --abort
+            echo "merge_failed=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::Automatic merge of upstream/main failed; resolve conflicts manually."
+            exit 0
+          fi
+          echo "merge_failed=false" >> "$GITHUB_OUTPUT"
+
+      - name: Push to fork
+        if: steps.merge.outputs.merge_failed == 'false'
+        run: git push origin main
