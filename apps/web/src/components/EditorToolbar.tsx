@@ -61,6 +61,21 @@ const ToolbarDivider = () => <div className="h-6 w-px shrink-0 bg-slate-200" />;
 const isToolbarEditorReady = (editor: Editor | null): editor is Editor =>
   Boolean(editor && !editor.isDestroyed && (editor as { extensionManager?: unknown }).extensionManager);
 
+const editorHasCodeBlock = (editor: Editor) => {
+  let found = false;
+
+  editor.state.doc.descendants((node) => {
+    if (node.type.name === "codeBlock") {
+      found = true;
+      return false;
+    }
+
+    return true;
+  });
+
+  return found;
+};
+
 const toggleCodeBlock = (editor: Editor) => {
   const { from, to, empty } = editor.state.selection;
   const selectedText = editor.state.doc.textBetween(from, to, "\n", "\n");
@@ -88,9 +103,6 @@ export const EditorToolbar = ({ editor, readOnly }: { editor: Editor | null; rea
   const editorReady = isToolbarEditorReady(editor);
   const disabled = readOnly || !editorReady;
   const blockValue = getActiveBlockValue(editor);
-  const codeBlockLanguage = editorReady
-    ? getCodeBlockLanguageValue(editor.getAttributes("codeBlock").language)
-    : "plaintext";
   const isActive = (name: string) => {
     if (!editorReady) {
       return false;
@@ -102,6 +114,11 @@ export const EditorToolbar = ({ editor, readOnly }: { editor: Editor | null; rea
       return false;
     }
   };
+  const codeBlockActive = isActive("codeBlock");
+  const showCodeLanguageSelector = editorReady && editorHasCodeBlock(editor);
+  const codeBlockLanguage = editorReady
+    ? getCodeBlockLanguageValue(editor.getAttributes("codeBlock").language)
+    : "plaintext";
 
   const canRun = (command: (editor: Editor) => boolean) => {
     if (!isToolbarEditorReady(editor) || readOnly) {
@@ -255,16 +272,16 @@ export const EditorToolbar = ({ editor, readOnly }: { editor: Editor | null; rea
           </EditorToolbarButton>
           <EditorToolbarButton
             title={t("editorToolbar.codeBlock")}
-            active={isActive("codeBlock")}
+            active={codeBlockActive}
             disabled={disabled}
             onClick={() => run(toggleCodeBlock)}
           >
             <SquareCode className="h-4 w-4" />
           </EditorToolbarButton>
-          {isActive("codeBlock") && (
+          {showCodeLanguageSelector && (
             <Select
               value={codeBlockLanguage}
-              disabled={disabled}
+              disabled={disabled || !codeBlockActive}
               onValueChange={(value) =>
                 run((current) => current.chain().focus().updateAttributes("codeBlock", { language: value }).run())
               }
