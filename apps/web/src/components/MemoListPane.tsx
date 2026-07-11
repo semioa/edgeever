@@ -28,6 +28,7 @@ import {
   FileText as FileIcon,
   Star,
   RotateCcw,
+  RefreshCw,
   Folder,
   Merge,
   FilePlus2,
@@ -354,7 +355,10 @@ export const MemoListPane = ({
   onOpenAssets,
   onOpenTrash,
   onOpenSettings,
+  onSyncMemos,
   onCreateMemo,
+  isSyncingMemos,
+  canSyncMemos,
   mobileListActionsOpen,
   setMobileListActionsOpen,
   mobileMoveOpen,
@@ -422,7 +426,10 @@ export const MemoListPane = ({
   onOpenAssets: () => void;
   onOpenTrash: () => void;
   onOpenSettings: () => void;
+  onSyncMemos: () => void;
   onCreateMemo: () => void;
+  isSyncingMemos: boolean;
+  canSyncMemos: boolean;
   mobileListActionsOpen: boolean;
   setMobileListActionsOpen: (open: boolean) => void;
   mobileMoveOpen: boolean;
@@ -504,6 +511,11 @@ export const MemoListPane = ({
   const hasListConstraint = Boolean(search.trim()) || filterMode !== "all";
   const activeFilterLabel = filterOptions.find((option) => option.value === filterMode)?.label ?? t("options.memoFilter.all");
   const activeSortLabel = memoSortOptions.find((option) => option.value === sortMode)?.label ?? t("options.memoSort.updatedDesc");
+  const syncMemosTitle = !canSyncMemos
+    ? t("memoList.manualSyncOffline")
+    : isSyncingMemos
+      ? t("memoList.manualSyncing")
+      : t("memoList.manualSync");
 
   useEffect(() => {
     if (notebook?.id) {
@@ -1099,6 +1111,16 @@ export const MemoListPane = ({
             </ToggleGroup>
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            <Button
+              size="icon"
+              variant="ghost"
+              title={syncMemosTitle}
+              aria-label={syncMemosTitle}
+              disabled={!canSyncMemos || isSyncingMemos}
+              onClick={onSyncMemos}
+            >
+              <RefreshCw className={cn("h-4 w-4", isSyncingMemos && "animate-spin")} />
+            </Button>
             {view === "trash" && (
               <Button
                 size="sm"

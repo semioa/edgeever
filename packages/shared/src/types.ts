@@ -33,9 +33,18 @@ export type MemoDetail = MemoSummary & {
   contentJson: TiptapDoc;
   contentMarkdown: string;
   contentText: string;
+  contentHash: string;
   sourceMemoIds: string[];
   mergeSourceCount: number;
   mergedIntoMemoId: string | null;
+};
+
+export type MemoEditSession = {
+  id: string;
+  memoId: string;
+  baseRevision: number;
+  baseContentHash: string;
+  expiresAt: string;
 };
 
 export type MemoRevision = {

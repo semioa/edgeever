@@ -22,6 +22,8 @@ export const MemoCreateSchema = z.object({
 
 export const MemoUpdateSchema = z.object({
   expectedRevision: z.number().int().min(0).optional(),
+  expectedContentHash: z.string().length(64).optional(),
+  editSessionId: z.string().trim().min(1).optional(),
   notebookId: z.string().trim().min(1).optional(),
   title: z.string().trim().max(160).optional(),
   isPinned: z.boolean().optional(),
@@ -30,6 +32,7 @@ export const MemoUpdateSchema = z.object({
   tags: z.array(z.string()).optional(),
   createdAt: z.string().datetime().optional(),
   updatedAt: z.string().datetime().optional(),
+  allowDestructiveOverwrite: z.boolean().optional(),
 });
 
 export const MoveMemosSchema = z.object({

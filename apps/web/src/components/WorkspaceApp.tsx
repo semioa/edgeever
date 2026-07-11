@@ -775,6 +775,7 @@ export const WorkspaceApp = ({
   const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [isDesktop, setIsDesktop] = useState(isDesktopViewport);
   const [isSyncingQueuedChanges, setIsSyncingQueuedChanges] = useState(false);
+  const [isManualMemoSyncing, setIsManualMemoSyncing] = useState(false);
   const [isStandaloneRuntime] = useState(isStandaloneApp);
   const [pullToRefreshDistance, setPullToRefreshDistance] = useState(0);
   const [isPullRefreshing, setIsPullRefreshing] = useState(false);
@@ -844,6 +845,27 @@ export const WorkspaceApp = ({
       setPullToRefreshDistance(0);
     }
   }, [queryClient]);
+
+  const syncMemosManually = useCallback(async () => {
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      setIsOnline(false);
+      return;
+    }
+
+    setIsManualMemoSyncing(true);
+
+    try {
+      await runQueuedSync();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["memos"] }),
+        queryClient.invalidateQueries({ queryKey: ["memo"] }),
+        queryClient.invalidateQueries({ queryKey: ["notebooks"] }),
+        queryClient.invalidateQueries({ queryKey: ["resources"], refetchType: "all" }),
+      ]);
+    } finally {
+      setIsManualMemoSyncing(false);
+    }
+  }, [queryClient, runQueuedSync]);
 
   const notebooksQuery = useQuery({
     queryKey: ["notebooks"],
@@ -1568,7 +1590,7 @@ export const WorkspaceApp = ({
   };
 
   const handleDeleteNotebook = (notebook: Notebook) => {
-    if (notebook.slug === "inbox") {
+    if (notebook.id === "nb_inbox" || notebook.slug === "inbox" || notebook.name === "等待分类") {
       setAppNoticeDialog({
         title: t("workspace.inboxDeleteTitle"),
         description: t("workspace.inboxDeleteDescription"),
@@ -2408,6 +2430,9 @@ export const WorkspaceApp = ({
               onOpenAssets={handleOpenAssets}
               onOpenTags={handleOpenTags}
               onOpenSettings={handleOpenSettings}
+              onSyncMemos={() => void syncMemosManually()}
+              isSyncingMemos={isManualMemoSyncing || isSyncingQueuedChanges || isPullRefreshing || memosQuery.isRefetching}
+              canSyncMemos={isOnline}
               onOpenTrash={() => {
                 navigateWorkspaceHome();
                 setMemoView("trash");

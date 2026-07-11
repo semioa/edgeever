@@ -128,8 +128,18 @@ const syncQueueItem = async (item: SyncQueueItem): Promise<MemoDetail> => {
     throw new Error(`Unsupported sync item kind: ${item.kind}`);
   }
 
+  const { editSession } = await api.createMemoEditSession(item.memoId);
+  if (
+    editSession.baseRevision !== item.payload.expectedRevision ||
+    editSession.baseContentHash !== item.payload.expectedContentHash
+  ) {
+    throw new ApiRequestError("Note changed before the offline draft could sync.", 409, "revision_conflict");
+  }
+
   const data = await api.updateMemo(item.memoId, {
     expectedRevision: item.payload.expectedRevision,
+    expectedContentHash: item.payload.expectedContentHash,
+    editSessionId: editSession.id,
     title: item.payload.title,
     contentJson: item.payload.contentJson as TiptapDoc,
     tags: item.payload.tags,

@@ -1,0 +1,21 @@
+---
+import Container from "@/components/container.astro";
+import Layout from "./Layout.astro";
+
+const { title, description, backHref, backLabel } = Astro.props;
+---
+
+<Layout title={title} description={description}>
+  <Container>
+    <article class="mx-auto mt-14 max-w-[735px]">
+      <div class="prose prose-lg max-w-none">
+        <slot />
+      </div>
+      <div class="mt-10 text-center">
+        <a class="rounded-md bg-gray-100 px-5 py-3 transition hover:bg-gray-200" href={backHref}>
+          {backLabel}
+        </a>
+      </div>
+    </article>
+  </Container>
+</Layout>

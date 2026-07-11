@@ -3,7 +3,7 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
-import { docToMarkdown, emptyDoc, type MemoDetail, type Notebook, type TiptapDoc } from "@edgeever/shared";
+import { docToMarkdown, emptyDoc, type MemoDetail, type MemoEditSession, type Notebook, type TiptapDoc } from "@edgeever/shared";
 import {
   MobileEditorFallback,
   MobileEditorHeader,
@@ -52,6 +52,7 @@ export const MobileStandaloneTiptapEditor = ({
   const draftKey = getMobileEditorDraftKey(memoId);
   const [memo, setMemo] = useState<MemoDetail | null>(null);
   const memoRef = useRef<MemoDetail | null>(null);
+  const editSessionRef = useRef<MemoEditSession | null>(null);
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
   const [notebookUpdatePending, setNotebookUpdatePending] = useState(false);
   const [notebookSheetOpen, setNotebookSheetOpen] = useState(false);
@@ -124,6 +125,8 @@ export const MobileStandaloneTiptapEditor = ({
     void queueMemoUpdate({
       memoId: currentMemo.id,
       expectedRevision: currentMemo.revision,
+      expectedContentHash: currentMemo.contentHash,
+      editSessionId: editSessionRef.current?.id ?? "",
       title: draft.title,
       contentJson: draft.contentJson,
       tags: parseMobileEditorTags(draft.tagsText),
@@ -251,15 +254,31 @@ export const MobileStandaloneTiptapEditor = ({
     ]);
   }, [draftKey]);
 
-  const buildSavePayload = useCallback((currentMemo: MemoDetail) => ({
-    expectedRevision: currentMemo.revision,
-    title: titleRef.current,
-    contentJson: contentJsonRef.current,
-    tags: parseMobileEditorTags(tagsTextRef.current),
-  }), []);
+  const buildSavePayload = useCallback((currentMemo: MemoDetail) => {
+    const editSession = editSessionRef.current;
+    if (!editSession || editSession.memoId !== currentMemo.id) {
+      throw new Error("编辑会话尚未就绪");
+    }
+
+    return {
+      expectedRevision: currentMemo.revision,
+      expectedContentHash: currentMemo.contentHash,
+      editSessionId: editSession.id,
+      title: titleRef.current,
+      contentJson: contentJsonRef.current,
+      tags: parseMobileEditorTags(tagsTextRef.current),
+    };
+  }, []);
 
   const applySavedMemo = useCallback(async (savedMemo: MemoDetail, savedSnapshot: string) => {
     memoRef.current = savedMemo;
+    if (editSessionRef.current) {
+      editSessionRef.current = {
+        ...editSessionRef.current,
+        baseRevision: savedMemo.revision,
+        baseContentHash: savedMemo.contentHash,
+      };
+    }
     setMemo(savedMemo);
     backgroundSavePendingRef.current = false;
     lastSavedSnapshotRef.current = savedSnapshot;
@@ -608,10 +627,18 @@ export const MobileStandaloneTiptapEditor = ({
 
     void (async () => {
       try {
-        const data = await requestMobileEditorJson<MobileEditorMemoResponse>(`/api/v1/memos/${encodeURIComponent(memoId)}`);
+        const [data, sessionData] = await Promise.all([
+          requestMobileEditorJson<MobileEditorMemoResponse>(`/api/v1/memos/${encodeURIComponent(memoId)}`),
+          requestMobileEditorJson<{ editSession: MemoEditSession }>(`/api/v1/memos/${encodeURIComponent(memoId)}/edit-sessions`, {
+            method: "POST",
+            body: JSON.stringify({}),
+          }),
+        ]);
         if (cancelled) {
           return;
         }
+
+        editSessionRef.current = sessionData.editSession;
 
         const nextTitle = data.memo.title || "";
         const nextTagsText = Array.isArray(data.memo.tags) ? data.memo.tags.join(", ") : "";

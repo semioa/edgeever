@@ -7,6 +7,7 @@ const SYNC_QUEUE_KEY = "edgeever.mobile.syncQueue.v1";
 export type MobileMemoUpdateSyncPayload = {
   memoId: string;
   expectedRevision: number;
+  expectedContentHash: string;
   title: string;
   contentMarkdown: string;
   notebookId: string;
@@ -145,8 +146,19 @@ export const shouldQueueMobileMemoSaveError = (error: unknown) => {
 };
 
 const syncMobileQueueItem = async (client: ReturnType<typeof createEdgeEverClient>, item: MobileSyncQueueItem) => {
+  const { editSession } = await client.createMemoEditSession(item.memoId);
+
+  if (
+    editSession.baseRevision !== item.payload.expectedRevision ||
+    editSession.baseContentHash !== item.payload.expectedContentHash
+  ) {
+    throw new ApiRequestError("Note changed before the offline draft could sync.", 409, "revision_conflict");
+  }
+
   const response = await client.updateMemo(item.memoId, {
     expectedRevision: item.payload.expectedRevision,
+    expectedContentHash: item.payload.expectedContentHash,
+    editSessionId: editSession.id,
     title: item.payload.title,
     contentMarkdown: item.payload.contentMarkdown,
     notebookId: item.payload.notebookId,

@@ -641,6 +641,35 @@
         }
       }
     },
+    "/api/v1/memos/{id}/edit-sessions": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/MemoId"
+        }
+      ],
+      "post": {
+        "summary": "Start a bound memo edit session",
+        "description": "Binds an edit session to the memo id, current revision, current content hash, and authenticated actor.",
+        "responses": {
+          "200": {
+            "description": "Bound edit session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "editSession": {
+                      "$ref": "#/components/schemas/MemoEditSession"
+                    }
+                  },
+                  "required": ["editSession"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/memos/{id}/restore": {
       "parameters": [
         {
@@ -1199,6 +1228,11 @@
               "contentText": {
                 "type": "string"
               },
+              "contentHash": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64
+              },
               "sourceMemoIds": {
                 "type": "array",
                 "items": {
@@ -1212,7 +1246,7 @@
                 "type": ["string", "null"]
               }
             },
-            "required": ["contentJson", "contentMarkdown", "contentText", "sourceMemoIds", "mergeSourceCount", "mergedIntoMemoId"]
+            "required": ["contentJson", "contentMarkdown", "contentText", "contentHash", "sourceMemoIds", "mergeSourceCount", "mergedIntoMemoId"]
           }
         ]
       },
@@ -1245,6 +1279,14 @@
             "type": "integer",
             "minimum": 0
           },
+          "expectedContentHash": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64
+          },
+          "editSessionId": {
+            "type": "string"
+          },
           "notebookId": {
             "type": "string"
           },
@@ -1268,6 +1310,17 @@
             }
           }
         }
+      },
+      "MemoEditSession": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "memoId": { "type": "string" },
+          "baseRevision": { "type": "integer", "minimum": 0 },
+          "baseContentHash": { "type": "string", "minLength": 64, "maxLength": 64 },
+          "expiresAt": { "type": "string", "format": "date-time" }
+        },
+        "required": ["id", "memoId", "baseRevision", "baseContentHash", "expiresAt"]
       },
       "MoveMemosInput": {
         "type": "object",

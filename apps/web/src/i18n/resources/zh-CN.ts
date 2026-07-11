@@ -282,6 +282,9 @@ export const zhCN = {
     moveToNotebook: "移动到笔记本",
     deleteMemo: "删除笔记",
     toggleOffFilter: "取消{{label}}",
+    manualSync: "手动同步笔记",
+    manualSyncing: "正在同步笔记",
+    manualSyncOffline: "离线时无法同步笔记",
   },
   memoCard: {
     yesterday: "昨天",
@@ -368,6 +371,10 @@ export const zhCN = {
   editor: {
     imageScale: "图片缩放",
     scaleTo: "缩放到 {{percent}}%",
+    imageSizeSmall: "较小",
+    imageSizeMedium: "适中",
+    imageSizeLarge: "较大",
+    imageSizeFull: "铺满",
     resizeImage: "拖拽调整图片宽度",
     currentNotebook: "所在笔记本",
     close: "关闭",

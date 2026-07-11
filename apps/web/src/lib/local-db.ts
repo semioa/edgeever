@@ -13,6 +13,8 @@ export type LocalDraft = {
 export type MemoUpdateSyncPayload = {
   memoId: string;
   expectedRevision: number;
+  expectedContentHash: string;
+  editSessionId: string;
   title: string;
   contentJson: TiptapDoc;
   tags: string[];

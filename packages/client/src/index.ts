@@ -3,6 +3,7 @@ import type {
   AuthSession,
   CreatedApiToken,
   MemoDetail,
+  MemoEditSession,
   MemoRevision,
   MemoSummary,
   Notebook,
@@ -257,6 +258,12 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       return request<MemoResponse>(`/api/v1/memos/${memoId}${suffix}`);
     },
 
+    createMemoEditSession: (memoId: string) =>
+      request<{ editSession: MemoEditSession }>(`/api/v1/memos/${memoId}/edit-sessions`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+
     listMemoRevisions: (memoId: string) => request<ListMemoRevisionsResponse>(`/api/v1/memos/${memoId}/revisions`),
 
     restoreMemoRevision: (memoId: string, revisionId: string) =>
@@ -277,12 +284,15 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       memoId: string,
       payload: {
         expectedRevision?: number;
+        expectedContentHash?: string;
+        editSessionId?: string;
         notebookId?: string;
         title?: string;
         isPinned?: boolean;
         contentJson?: TiptapDoc;
         contentMarkdown?: string;
         tags?: string[];
+        allowDestructiveOverwrite?: boolean;
       }
     ) =>
       request<MemoResponse>(`/api/v1/memos/${memoId}`, {

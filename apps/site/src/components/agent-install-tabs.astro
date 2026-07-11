@@ -17,24 +17,10 @@ const copy = isEnglish
       copyFailed: "Copy failed",
       billingNotice:
         "Heads up: Cloudflare R2, D1, and Workers may ask you to add a Visa card even when you use the free quotas.",
-      manualIntro:
-        "Manual installation is best if you are comfortable with Cloudflare and the command line. Fork the repository first, then deploy from your own fork.",
-      step1: "Step 1",
-      step1Title: "Fork the official repository",
-      step2: "Step 2",
-      step2Title: "Clone your fork",
-      step3: "Step 3",
-      step3Title: "Deploy with the automated helper commands",
-      manualCloudflare: "Create Cloudflare resources manually",
-      manualHint: "Put the database_id returned by the D1 command and your password hash into your local .env.local file.",
+      manualGuide: "Open the complete manual deployment guide",
+      manualGuideHref: "/en/manual-deploy",
       promptText:
         "Please fork the EdgeEver repository first: https://github.com/tianma-if/edgeever\n\nAfter the fork is ready, use the forked repository to install and deploy EdgeEver to Cloudflare, and configure automatic upstream sync for the fork so future product updates can be pulled in.",
-      forkUrl: "https://github.com/tianma-if/edgeever",
-      cloneCommand: "git clone <your fork repository URL>\ncd edgeever",
-      deployCommand:
-        "cp .env.local.example .env.local\nbun install\nEDGE_EVER_PASSWORD='<your password>' bun run deploy:setup\nbun run deploy:doctor\nbun run deploy",
-      manualCommand:
-        "cp .env.local.example .env.local\nbun install\nbunx wrangler d1 create edgeever\nbunx wrangler r2 bucket create edgeever-resources\nbun run auth:hash -- <your password>\nbun run deploy",
     }
   : {
       manual: "手动部署",
@@ -47,23 +33,10 @@ const copy = isEnglish
       copyFailed: "复制失败",
       billingNotice:
         "提示：Cloudflare 的 R2、D1 和 Worker 即使使用免费额度，开通或使用时也可能要求绑定 Visa 卡。国内用户可考虑使用招商银行多币种卡绑定。",
-      manualIntro: "手动部署适合熟悉 Cloudflare 与命令行的用户。先 Fork 仓库，再从你自己的 Fork 仓库部署。",
-      step1: "第一步",
-      step1Title: "Fork 官方仓库",
-      step2: "第二步",
-      step2Title: "Clone 你的 Fork 仓库",
-      step3: "第三步",
-      step3Title: "使用自动化辅助命令部署",
-      manualCloudflare: "手动创建 Cloudflare 资源",
-      manualHint: "把 D1 创建命令返回的 database_id 和密码 hash 填入本机 .env.local。",
+      manualGuide: "查看完整手动部署指南",
+      manualGuideHref: "/manual-deploy",
       promptText:
         "请先 Fork EdgeEver 仓库：https://github.com/tianma-if/edgeever\n\nFork 完成后，请使用 Fork 后的仓库把 EdgeEver 部署到 Cloudflare 上，并为 Fork 仓库配置自动同步上游，以便后续获取最新产品特性。",
-      forkUrl: "https://github.com/tianma-if/edgeever",
-      cloneCommand: "git clone <你的 Fork 仓库 URL>\ncd edgeever",
-      deployCommand:
-        "cp .env.local.example .env.local\nbun install\nEDGE_EVER_PASSWORD='<你的密码>' bun run deploy:setup\nbun run deploy:doctor\nbun run deploy",
-      manualCommand:
-        "cp .env.local.example .env.local\nbun install\nbunx wrangler d1 create edgeever\nbunx wrangler r2 bucket create edgeever-resources\nbun run auth:hash -- <你的密码>\nbun run deploy",
     };
 ---
 
@@ -117,38 +90,13 @@ const copy = isEnglish
     </div>
 
     <div class="agent-install-panel hidden" data-tab-panel="manual">
-      <p class="mx-auto max-w-3xl text-center text-lg leading-9 text-slate-600">
-        {copy.manualIntro}
-      </p>
-
-      <div class="mx-auto mt-8 grid max-w-3xl gap-4">
-        <div class="rounded-2xl bg-white p-6 shadow-sm">
-          <p class="text-sm font-semibold text-brand-text">{copy.step1}</p>
-          <h3 class="mt-2 text-xl font-bold text-slate-900">{copy.step1Title}</h3>
-          <pre class="mt-4 whitespace-pre-wrap rounded-xl bg-slate-50 p-4 font-mono text-sm leading-7 text-slate-800">{copy.forkUrl}</pre>
-        </div>
-
-        <div class="rounded-2xl bg-white p-6 shadow-sm">
-          <p class="text-sm font-semibold text-brand-text">{copy.step2}</p>
-          <h3 class="mt-2 text-xl font-bold text-slate-900">{copy.step2Title}</h3>
-          <pre class="mt-4 whitespace-pre-wrap rounded-xl bg-slate-50 p-4 font-mono text-sm leading-7 text-slate-800">{copy.cloneCommand}</pre>
-        </div>
-
-        <div class="rounded-2xl bg-white p-6 shadow-sm">
-          <p class="text-sm font-semibold text-brand-text">{copy.step3}</p>
-          <h3 class="mt-2 text-xl font-bold text-slate-900">{copy.step3Title}</h3>
-          <pre class="mt-4 whitespace-pre-wrap rounded-xl bg-slate-50 p-4 font-mono text-sm leading-7 text-slate-800">{copy.deployCommand}</pre>
-        </div>
-
-        <details class="rounded-2xl bg-white p-6 shadow-sm">
-          <summary class="cursor-pointer text-base font-semibold text-slate-900">
-            {copy.manualCloudflare}
-          </summary>
-          <pre class="mt-4 whitespace-pre-wrap rounded-xl bg-slate-50 p-4 font-mono text-sm leading-7 text-slate-800">{copy.manualCommand}</pre>
-          <p class="mt-4 text-sm leading-6 text-slate-500">
-            {copy.manualHint}
-          </p>
-        </details>
+      <div class="mx-auto flex justify-center">
+        <a
+          class="inline-flex items-center gap-2 rounded-full bg-brand px-8 py-3 text-base font-semibold text-white shadow-[0_14px_30px_-18px_rgb(var(--edgeever-brand-rgb)/0.85)] transition hover:-translate-y-0.5 hover:bg-brand-hover"
+          href={copy.manualGuideHref}>
+          {copy.manualGuide}
+          <Icon class="h-5 w-5" name="bx:bx-right-arrow-alt" />
+        </a>
       </div>
     </div>
   </div>

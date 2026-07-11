@@ -606,8 +606,17 @@ export const WorkspaceScreen = () => {
         throw new Error("Client is not ready");
       }
 
+      const editSessionResponse = payload.contentMarkdown !== undefined
+        ? await client.createMemoEditSession(memo.id)
+        : null;
       const response = await client.updateMemo(memo.id, {
         expectedRevision: memo.revision,
+        ...(editSessionResponse
+          ? {
+              expectedContentHash: memo.contentHash,
+              editSessionId: editSessionResponse.editSession.id,
+            }
+          : {}),
         ...payload,
       });
 
@@ -2250,6 +2259,11 @@ const NotebookManagerModal = ({
   });
 
   const requestDeleteNotebook = (notebook: Notebook) => {
+    if (notebook.id === "nb_inbox" || notebook.slug === "inbox" || notebook.name === "等待分类") {
+      Alert.alert("等待分类不能删除", "等待分类是默认笔记本，用来保证新笔记始终有归属。");
+      return;
+    }
+
     Alert.alert("删除笔记本？", `将删除“${notebook.name}”。如果服务端不允许删除非空笔记本，请先移动或删除其中笔记。`, [
       { text: "取消", style: "cancel" },
       {
@@ -3280,9 +3294,12 @@ const ResourcesModal = ({
       }
 
       setUploadProgress("写入笔记正文");
+      const { editSession } = await client.createMemoEditSession(activeMemo.id);
       const { memo } = await client.updateMemo(activeMemo.id, {
         contentMarkdown: nextMarkdown,
         expectedRevision: activeMemo.revision,
+        expectedContentHash: activeMemo.contentHash,
+        editSessionId: editSession.id,
       });
 
       return { memo, resources };
@@ -4295,6 +4312,7 @@ const EditMemoModal = ({
           await queueMobileMemoUpdate({
             memoId: memo.id,
             expectedRevision: memo.revision,
+            expectedContentHash: memo.contentHash,
             title: title.trim() || DEFAULT_MEMO_TITLE,
             contentMarkdown,
             notebookId,

@@ -8,6 +8,8 @@ import {
   DeleteMemosSchema,
   LoginSchema,
   markdownToDoc,
+  isSuspiciousMemoOverwrite,
+  isMemoEditBindingValid,
   MemoCreateSchema,
   MemoUpdateSchema,
   MergeMemosSchema,
@@ -19,6 +21,7 @@ import {
   type ApiToken,
   type CreatedApiToken,
   type MemoDetail,
+  type MemoEditSession,
   type MemoRevision,
   type MemoSummary,
   type MemoUpdateInput,
@@ -130,6 +133,16 @@ type MemoRevisionRow = {
   created_at: string;
 };
 
+type MemoEditSessionRow = {
+  id: string;
+  memo_id: string;
+  actor_type: "user" | "agent";
+  actor_id: string | null;
+  base_revision: number;
+  base_content_hash: string;
+  expires_at: string;
+};
+
 type UserRow = {
   id: string;
   username: string;
@@ -211,8 +224,8 @@ const PASSWORD_HASH_ITERATIONS = 100_000;
 const PASSWORD_HASH_BYTES = 32;
 const PASSWORD_SALT_BYTES = 16;
 const SESSION_TOKEN_BYTES = 32;
-const DEFAULT_SESSION_TTL_DAYS = 5 * 365;
-const MAX_SESSION_TTL_DAYS = 5 * 365;
+const DEFAULT_SESSION_TTL_DAYS = 400;
+const MAX_SESSION_TTL_DAYS = 400;
 const DEFAULT_R2_BUCKET_NAME = "edgeever-resources";
 const DEMO_SEED_NOTEBOOKS = [
   { id: "nb_inbox", parentId: null, name: "等待分类", slug: "inbox", icon: "notebook", color: "#0f766e", sortOrder: 10 },
@@ -1038,6 +1051,53 @@ app.get("/api/v1/memos/:id", async (c) => {
   return c.json({ memo });
 });
 
+app.post("/api/v1/memos/:id/edit-sessions", async (c) => {
+  const denied = requireScopes(c, "write:memos");
+
+  if (denied) {
+    return denied;
+  }
+
+  const memoId = c.req.param("id");
+  const current = await getMemoDetailRow(c.env.DB, memoId);
+
+  if (!current) {
+    return notFound(c, "Memo not found");
+  }
+
+  const actor = getAuditActor(c);
+  const now = isoNow();
+  const session: MemoEditSession = {
+    id: createId("edit"),
+    memoId,
+    baseRevision: current.revision,
+    baseContentHash: current.content_hash,
+    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString(),
+  };
+
+  await c.env.DB.batch([
+    c.env.DB.prepare(`DELETE FROM memo_edit_sessions WHERE expires_at <= ?`).bind(now),
+    c.env.DB.prepare(
+      `INSERT INTO memo_edit_sessions (
+         id, memo_id, actor_type, actor_id, base_revision, base_content_hash,
+         expires_at, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      session.id,
+      memoId,
+      actor.actorType,
+      actor.actorId,
+      session.baseRevision,
+      session.baseContentHash,
+      session.expiresAt,
+      now,
+      now
+    ),
+  ]);
+
+  return c.json({ editSession: session });
+});
+
 app.get("/api/v1/memos/:id/revisions", async (c) => {
   const denied = requireScopes(c, "read:memos");
 
@@ -1494,6 +1554,57 @@ const updateMemoFromInput = async (c: AppContext, id: string, input: MemoUpdateI
     );
   }
 
+  const hasDocumentUpdate = input.contentJson !== undefined || input.contentMarkdown !== undefined;
+  let editSession: MemoEditSessionRow | null = null;
+
+  if (hasDocumentUpdate) {
+    if (!input.editSessionId || !input.expectedContentHash || input.expectedRevision === undefined) {
+      return c.json(
+        { error: { code: "edit_session_required", message: "A bound edit session is required to save note content." } },
+        428
+      );
+    }
+
+    if (input.expectedContentHash !== current.content_hash) {
+      return c.json(
+        { error: { code: "content_conflict", message: "Note content changed after this edit session started." } },
+        409
+      );
+    }
+
+    editSession = await c.env.DB.prepare(
+      `SELECT id, memo_id, actor_type, actor_id, base_revision, base_content_hash, expires_at
+       FROM memo_edit_sessions
+       WHERE id = ? AND memo_id = ? AND actor_type = ? AND actor_id IS ? AND expires_at > ?`
+    )
+      .bind(input.editSessionId, id, actor.actorType, actor.actorId, isoNow())
+      .first<MemoEditSessionRow>();
+
+    if (
+      !editSession ||
+      !isMemoEditBindingValid(
+        { memoId: id, revision: current.revision, contentHash: current.content_hash },
+        {
+          id: editSession.id,
+          memoId: editSession.memo_id,
+          baseRevision: editSession.base_revision,
+          baseContentHash: editSession.base_content_hash,
+        },
+        {
+          editSessionId: input.editSessionId,
+          memoId: id,
+          expectedRevision: input.expectedRevision,
+          expectedContentHash: input.expectedContentHash,
+        }
+      )
+    ) {
+      return c.json(
+        { error: { code: "edit_session_conflict", message: "The edit session is stale or belongs to another note." } },
+        409
+      );
+    }
+  }
+
   const isPinned = input.isPinned ?? Boolean(current.is_pinned);
   const hasContentUpdate =
     input.notebookId !== undefined ||
@@ -1534,6 +1645,20 @@ const updateMemoFromInput = async (c: AppContext, id: string, input: MemoUpdateI
   const contentText = docToText(contentJson);
   const title =
     input.title !== undefined ? normalizeMemoTitle(input.title) : normalizeMemoTitle(current.title);
+  if (
+    !input.allowDestructiveOverwrite &&
+    isSuspiciousMemoOverwrite(current.title, current.content_text, title, contentText)
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "suspicious_memo_overwrite",
+          message: "Save blocked because the title changed while most of the note content disappeared.",
+        },
+      },
+      409
+    );
+  }
   const tags = input.tags === undefined ? parseJsonArray(current.tags_json) : normalizeTags(input.tags);
   const excerpt = createExcerpt(contentText);
   const notebookId = input.notebookId ?? current.notebook_id;
@@ -1542,6 +1667,32 @@ const updateMemoFromInput = async (c: AppContext, id: string, input: MemoUpdateI
   const revisionStatements = (await shouldSnapshotMemoRevision(c.env.DB, current, title, JSON.stringify(tags), contentHash, updatedAt))
     ? [createMemoRevisionStatement(c.env.DB, current, actorLabel, updatedAt)]
     : [];
+  const editSessionStatements = editSession
+    ? [
+        c.env.DB.prepare(
+          `UPDATE memo_edit_sessions
+           SET base_revision = ?, base_content_hash = ?, updated_at = ?
+           WHERE id = ? AND memo_id = ? AND base_revision = ? AND base_content_hash = ?`
+        ).bind(nextRevision, contentHash, updatedAt, editSession.id, id, current.revision, current.content_hash),
+      ]
+    : [
+        c.env.DB.prepare(
+          `UPDATE memo_edit_sessions
+           SET base_revision = ?, base_content_hash = ?, updated_at = ?
+           WHERE memo_id = ? AND actor_type = ? AND actor_id IS ?
+             AND base_revision = ? AND base_content_hash = ? AND expires_at > ?`
+        ).bind(
+          nextRevision,
+          contentHash,
+          updatedAt,
+          id,
+          actor.actorType,
+          actor.actorId,
+          current.revision,
+          current.content_hash,
+          updatedAt
+        ),
+      ];
 
   await c.env.DB.batch([
     ...revisionStatements,
@@ -1561,6 +1712,7 @@ const updateMemoFromInput = async (c: AppContext, id: string, input: MemoUpdateI
       `INSERT INTO memos_fts (memo_id, title, content_text, tags)
        VALUES (?, ?, ?, ?)`
     ).bind(id, title, contentText, tags.join(" ")),
+    ...editSessionStatements,
     auditStatement(c.env.DB, actor.actorType, actor.actorId, "memo.update", "memo", id, {
       revision: nextRevision,
     }),
@@ -3089,6 +3241,7 @@ const mapMemoDetail = (row: MemoDetailRow): MemoDetail => ({
   contentJson: parseDoc(row.content_json),
   contentMarkdown: row.content_markdown,
   contentText: row.content_text,
+  contentHash: row.content_hash,
   sourceMemoIds: parseJsonArray(row.source_memo_ids),
   mergeSourceCount: row.merge_source_count,
   mergedIntoMemoId: row.merged_into_memo_id,
@@ -4436,6 +4589,7 @@ const updateMemoRecord = async (
     tags?: string[];
     createdAt?: string;
     updatedAt?: string;
+    allowDestructiveOverwrite?: boolean;
   },
   actor: { actorType: "user" | "agent"; actorId: string | null },
   actorLabel: string
@@ -4505,6 +4659,15 @@ const updateMemoRecord = async (
   const contentText = docToText(contentJson);
   const title =
     input.title !== undefined ? normalizeMemoTitle(input.title) : normalizeMemoTitle(current.title);
+  if (
+    !input.allowDestructiveOverwrite &&
+    isSuspiciousMemoOverwrite(current.title, current.content_text, title, contentText)
+  ) {
+    return {
+      error: "suspicious_memo_overwrite",
+      message: "Save blocked because the title changed while most of the note content disappeared.",
+    };
+  }
   const tags = input.tags === undefined ? parseJsonArray(current.tags_json) : normalizeTags(input.tags);
   const excerpt = createExcerpt(contentText);
   const notebookId = input.notebookId ?? current.notebook_id;

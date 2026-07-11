@@ -27,6 +27,8 @@ The public demo resets daily and restores sample notes. Do not store private con
 
 Copy this prompt into your AI coding assistant, such as Claude Code, Codex, Antigravity, Cursor, or Trae:
 
+**Recommendation:** Before deployment, configure GitHub and Cloudflare MCP servers, plugins, or other supported integrations for your AI Agent. This allows it to fork the repository, create the required Cloudflare resources, and deploy the application.
+
 ```text
 Please fork the EdgeEver repository first: https://github.com/tianma-if/edgeever
 
@@ -39,7 +41,9 @@ Agents should follow [AI Agent Cloudflare Deployment](docs/agent-deploy-cloudfla
 
 ### Manual Deployment
 
-Please refer to the [Cloudflare Manual Deployment Guide](docs/manual-deploy.en-US.md) for step-by-step instructions on manual installation and updating.
+Please refer to the [Cloudflare Manual Deployment Guide](docs/manual-deploy.md) for step-by-step instructions on manual installation and updating.
+
+The automated helper commands are recommended. If you create the Cloudflare resources manually, finish configuring `.env.local`—including the D1 ID, R2 bucket, password hash, and the 400-day session limit—before running `bun run deploy`.
 
 
 ## Features
@@ -61,6 +65,12 @@ Please refer to the [Cloudflare Manual Deployment Guide](docs/manual-deploy.en-U
 ## PWA Installation
 
 EdgeEver can be installed as a PWA on desktop or mobile home screens. On desktop, open the site in Chrome or Edge and use the install icon in the address bar. On Android, open it in Chrome, use the three-dot menu, and choose **Add to Home screen** or **Install**. Avoid installing from embedded browsers such as WeChat.
+
+## Native Clients
+
+Native clients are part of the EdgeEver roadmap. The mobile app is planned to be built with React Native, and the desktop app is planned to be built with Tauri.
+
+The goal is to let users connect these clients to their own self-hosted EdgeEver instance, keeping the same Cloudflare-based backend, open API, and user-owned data model while providing a smoother native experience on mobile and desktop.
 
 ## Tech Stack
 
@@ -102,7 +112,9 @@ bun run build
 ```text
 apps/web          Vite + React frontend, PWA, offline drafts, and sync queue
 apps/api          Cloudflare Worker + Hono API, OpenAPI, MCP endpoint
+apps/mobile       Expo + React Native mobile app
 apps/site         Astro official website, deployable independently
+packages/client   Shared API client for web and mobile apps
 packages/shared   Shared types, Zod schemas, TipTap / Markdown conversion
 scripts           Wrangler wrapper, password hash, CLI, MCP stdio bridge, Evernote ENEX import
 migrations        D1 database migrations
@@ -147,12 +159,6 @@ If you want to migrate notes from other platforms to EdgeEver, please refer to t
 - **Evernote Migration**: Please refer to [docs/evernote-migration-guide.md](docs/evernote-migration-guide.md)
 - **Memos Migration**: Please refer to [docs/memos-migration-guide.md](docs/memos-migration-guide.md)
 - **Notion Migration**: Please refer to [docs/notion-migration-guide.md](docs/notion-migration-guide.md)
-
-## Development Roadmap
-
-Native clients are part of the EdgeEver roadmap. The mobile app is planned to be built with React Native, and the desktop app is planned to be built with Tauri.
-
-The goal is to let users connect these clients to their own self-hosted EdgeEver instance, keeping the same Cloudflare-based backend, open API, and user-owned data model while providing a smoother native experience on mobile and desktop.
 
 ## Community and Feedback
 
