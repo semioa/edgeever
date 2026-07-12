@@ -730,7 +730,10 @@ export const MemoListPane = ({
 
   const openMemoContextMenuAt = (memo: MemoSummary, clientX: number, clientY: number) => {
     const menuWidth = 224;
-    const menuHeight = view === "trash" ? 160 : 260;
+    // Keep enough room for the full action list. Radix can still adjust the
+    // final position, but this prevents the initial placement from starting
+    // below the viewport on short or zoomed desktop viewports.
+    const menuHeight = view === "trash" ? 180 : 320;
     const x = Math.min(clientX, Math.max(12, window.innerWidth - menuWidth - 12));
     const y = Math.min(clientY, Math.max(12, window.innerHeight - menuHeight - 12));
 
@@ -1012,8 +1015,8 @@ export const MemoListPane = ({
           </div>
         </div>
 
-        <div className="mb-3 hidden items-center justify-between gap-2 lg:flex">
-          <div className="flex min-w-0 items-center gap-1">
+        <div className="mb-3 hidden flex-wrap items-center justify-between gap-2 lg:flex">
+          <div className="flex min-w-0 flex-wrap items-center gap-1">
             <Button
               size="icon"
               variant="ghost"
@@ -1332,7 +1335,10 @@ export const MemoListPane = ({
             <DropdownMenuTrigger asChild>
               <span className="sr-only" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-56 bg-white border border-slate-200 rounded-md py-1 shadow-md">
+            <DropdownMenuContent
+              align="start"
+              className="max-h-[calc(100dvh-1.5rem)] w-56 max-w-[calc(100vw-1.5rem)] overflow-y-auto bg-white border border-slate-200 rounded-md py-1 shadow-md"
+            >
               <DropdownMenuItem
                 className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
                 onClick={() => {
