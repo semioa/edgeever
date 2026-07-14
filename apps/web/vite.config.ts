@@ -25,7 +25,11 @@ const readGitCommit = () => {
   }
 };
 
-const buildId = process.env.CF_PAGES_COMMIT_SHA?.slice(0, 12) ?? process.env.GITHUB_SHA?.slice(0, 12) ?? readGitCommit() ?? "local";
+const buildId = process.env.WORKERS_CI_COMMIT_SHA?.slice(0, 12)
+  ?? process.env.CF_PAGES_COMMIT_SHA?.slice(0, 12)
+  ?? process.env.GITHUB_SHA?.slice(0, 12)
+  ?? readGitCommit()
+  ?? "local";
 const appVersion = readPackageVersion();
 
 export default defineConfig({

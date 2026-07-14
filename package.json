@@ -16,7 +16,10 @@
     "dev:mobile": "bun --cwd apps/mobile expo start",
     "dev:site": "bun --cwd apps/site dev",
     "build": "bun run build:web",
+    "build:extension": "vite build --config apps/extension/vite.config.ts",
+    "dev:extension": "vite --config apps/extension/vite.config.ts",
     "build:web": "vite build --config apps/web/vite.config.ts",
+    "build:cloudflare": "bun run typecheck && bun run build",
     "build:site": "bun --cwd apps/site build",
     "preview:web": "vite preview --config apps/web/vite.config.ts --host 127.0.0.1 --port 4173",
     "preview:site": "bun --cwd apps/site preview",
@@ -32,7 +35,9 @@
     "deploy:doctor": "bun scripts/cloudflare-deploy.mjs doctor",
     "deploy:setup": "bun scripts/cloudflare-deploy.mjs setup",
     "deploy": "bun run build && bun run deploy:worker",
-    "deploy:worker": "bun run db:migrate:remote && bun scripts/run-wrangler.mjs deploy",
+    "deploy:worker": "bun run deploy:cloudflare-builds",
+    "deploy:cloudflare-builds": "bun run db:migrate:remote && bun scripts/run-wrangler.mjs deploy",
+    "deploy:builds:setup": "bun scripts/cloudflare-workers-builds.mjs setup",
     "deploy:site": "bun run build:site && wrangler pages deploy apps/site/dist --project-name=edgeever-official"
   },
   "cloudflare": {

@@ -1,6 +1,6 @@
 # Cloudflare Manual Deployment Guide
 
-If you are comfortable with Cloudflare and the command line, or prefer customized control over the deployment process, follow this guide for manual deployment and future updates.
+If you are comfortable with Cloudflare and the command line, or prefer customized control over first installation and resource setup, follow this guide for manual deployment. Cloudflare Workers Builds handles routine updates; local deployment is only for first installation and emergency recovery.
 
 > 💡 **Tip**: If you are deploying using an AI assistant (such as Claude Code, Codex, Antigravity, Cursor, or Trae), the agent should follow the [AI Agent Cloudflare Deployment](https://github.com/tianma-if/edgeever/blob/main/docs/agent-deploy-cloudflare.md) runbook.
 
@@ -68,18 +68,14 @@ Before running `bun run deploy`, copy the D1 `database_id`, R2 bucket name, and 
 
 ---
 
-## Updating to the Latest Version
+## Enable Automatic Updates
 
-When a new version is released, you can sync your fork and redeploy to apply updates:
+After the first deployment, connect the Worker to the fork's `main` branch. Cloudflare Workers Builds is the standard production deployment path for every EdgeEver instance. Follow [Cloudflare Workers Builds](cloudflare-workers-builds.md) to create the configuration-only **User API Token** (not an Account API Token), save it privately as `EDGE_EVER_BUILDS_API_TOKEN` in `.env.local`, then run:
 
-1. Open your EdgeEver fork on GitHub.
-2. Click **Sync fork** to pull the latest official code into your fork.
-3. Pull the updates locally and redeploy:
-   ```sh
-   git pull
-   bun install
-   bun run deploy:doctor
-   bun run deploy
-   ```
+```sh
+bun run deploy:builds:setup
+```
 
-> ⚠️ **Important**: Syncing the fork on GitHub only updates your repository code. It does not redeploy your Cloudflare instance. You must redeploy locally (or via an Agent) for the updates to take effect.
+The command configures the Git repository connection, production trigger, build variables, and the deployment token needed for D1 migrations. Afterwards, use **Sync fork** or push to `main`; Cloudflare automatically builds the web app, applies new remote D1 migrations, and deploys the Worker. No GitHub Actions secrets or local redeployment are required.
+
+Keep `bun run deploy` available for first installation and emergency recovery.

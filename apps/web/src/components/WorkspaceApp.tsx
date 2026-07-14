@@ -104,10 +104,11 @@ const NotebookPane = lazy(() => import("./NotebookPane").then((module) => ({ def
 const EvernoteImportGuidePane = lazy(() =>
   import("./EvernoteImportGuidePane").then((module) => ({ default: module.EvernoteImportGuidePane }))
 );
-const TagsDialog = lazy(() => import("./dialogs/TagsDialog").then((module) => ({ default: module.TagsDialog })));
+const TagsPane = lazy(() => import("./TagsPane").then((module) => ({ default: module.TagsPane })));
 const TemplatesDialog = lazy(() => import("./dialogs/TemplatesDialog").then((module) => ({ default: module.TemplatesDialog })));
 
 const SETTINGS_PATH = "/settings";
+const TRASH_VIEW_SEARCH = "?view=trash";
 const getMobileEditorReturnMemoId = (search: string) => new URLSearchParams(search).get(MOBILE_EDITOR_RETURN_PARAM);
 const emptySyncQueueSummary = (): SyncQueueSummary => ({
   total: 0,
@@ -142,6 +143,13 @@ type MemoDeleteOptimisticContext = {
   previousMemoLists: Array<[readonly unknown[], MemoListQueryData | undefined]>;
   previousMemoDetails: Array<[readonly unknown[], { memo: MemoDetail } | undefined]>;
   previousNotebooks: ListNotebooksQueryData | undefined;
+  previousActivePane: Pane;
+  previousSelectedMemoId: string | null;
+};
+
+type EmptyTrashOptimisticContext = {
+  previousMemoLists: Array<[readonly unknown[], MemoListQueryData | undefined]>;
+  previousMemoDetails: Array<[readonly unknown[], { memo: MemoDetail } | undefined]>;
   previousActivePane: Pane;
   previousSelectedMemoId: string | null;
 };
@@ -328,6 +336,19 @@ const removeMemoSummariesFromLists = (queryClient: QueryClient, memoIds: Set<str
 
     return changed ? { ...current, pages } : current;
   });
+};
+
+const clearTrashMemoLists = (queryClient: QueryClient) => {
+  for (const [queryKey, current] of queryClient.getQueriesData<MemoListQueryData>({ queryKey: ["memos", "trash"] })) {
+    if (!current) {
+      continue;
+    }
+
+    queryClient.setQueryData(queryKey, {
+      ...current,
+      pages: current.pages.map((page) => ({ ...page, memos: [], totalCount: 0, nextCursor: null })),
+    });
+  }
 };
 
 const decrementNotebookMemoCounts = (queryClient: QueryClient, removedMemos: MemoSummary[]) => {
@@ -739,8 +760,9 @@ export const WorkspaceApp = ({
   const navigate = useNavigate();
   const isInitialSettingsRoute = location.pathname === SETTINGS_PATH;
   const isInitialMobileEditorReturn = Boolean(getMobileEditorReturnMemoId(location.search));
+  const isTrashRoute = location.pathname === "/" && location.search === TRASH_VIEW_SEARCH;
   const [activePane, setActivePane] = useState<Pane>(() => (isInitialSettingsRoute && !isInitialMobileEditorReturn ? "editor" : "memos"));
-  const [memoView, setMemoView] = useState<MemoView>("notebook");
+  const [memoView, setMemoView] = useState<MemoView>(() => (isTrashRoute ? "trash" : "notebook"));
   const [selectedNotebookId, setSelectedNotebookId] = useState<string | null>(null);
   const [selectedMemoId, setSelectedMemoId] = useState<string | null>(null);
   const [createdMemoEditId, setCreatedMemoEditId] = useState<string | null>(null);
@@ -755,10 +777,9 @@ export const WorkspaceApp = ({
   const [multiSelectKeyDown, setMultiSelectKeyDown] = useState(false);
   const [imageCompressionEnabled, setImageCompressionEnabled] = useState(readImageCompressionPreference);
   const [shortcutSettings, setShortcutSettings] = useState<ShortcutSettings>(readShortcutSettingsPreference);
-  const [rightView, setRightView] = useState<"editor" | "settings" | "assets" | "evernote-migration">(() =>
+  const [rightView, setRightView] = useState<"editor" | "settings" | "assets" | "tags" | "evernote-migration">(() =>
     isInitialSettingsRoute ? "settings" : "editor"
   );
-  const [tagsOpen, setTagsOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [mobileNotebookPickerOpen, setMobileNotebookPickerOpen] = useState(false);
   const [mobileBottomNavActive, setMobileBottomNavActive] = useState<MobileBottomNavItem>(() =>
@@ -790,8 +811,14 @@ export const WorkspaceApp = ({
   const [desktopActionsOpen, setDesktopActionsOpen] = useState(false);
 
   const navigateWorkspaceHome = () => {
-    if (location.pathname !== "/") {
+    if (location.pathname !== "/" || location.search) {
       navigate("/");
+    }
+  };
+
+  const navigateWorkspaceTrash = () => {
+    if (location.pathname !== "/" || location.search !== TRASH_VIEW_SEARCH) {
+      navigate(`/${TRASH_VIEW_SEARCH}`);
     }
   };
 
@@ -895,7 +922,6 @@ export const WorkspaceApp = ({
       mobileSearchActive ||
       templatesOpen ||
       rightView !== "editor" ||
-      tagsOpen ||
       memoSelectionModeActive ||
       visibleActivePane === "editor" ||
       visibleActivePane === "notebooks"
@@ -912,7 +938,6 @@ export const WorkspaceApp = ({
       !mobileListActionsOpen &&
       !mobileMoveOpen &&
       !mobileMoreOpen &&
-      !tagsOpen &&
       !templatesOpen
   );
 
@@ -1016,9 +1041,10 @@ export const WorkspaceApp = ({
       return;
     }
 
+    setMemoView(isTrashRoute ? "trash" : "notebook");
     setRightView("editor");
     setMobileBottomNavActive("home");
-  }, [location.pathname]);
+  }, [isTrashRoute, location.pathname]);
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
@@ -1498,16 +1524,51 @@ export const WorkspaceApp = ({
 
   const emptyTrashMutation = useMutation({
     mutationFn: api.emptyTrash,
-    onSuccess: async () => {
+    onMutate: async (): Promise<EmptyTrashOptimisticContext> => {
       setEmptyTrashConfirmationOpen(false);
       clearMemoSelection();
       setSelectedMemoId(null);
       setActivePane("memos");
 
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["memos"] }),
-        queryClient.invalidateQueries({ queryKey: ["memo"] }),
-        queryClient.invalidateQueries({ queryKey: ["resources"] }),
+        queryClient.cancelQueries({ queryKey: ["memos"] }),
+        queryClient.cancelQueries({ queryKey: ["memo"] }),
+        queryClient.cancelQueries({ queryKey: ["resources"] }),
+      ]);
+
+      const previousMemoLists = queryClient.getQueriesData<MemoListQueryData>({ queryKey: ["memos"] });
+      const previousMemoDetails = queryClient.getQueriesData<{ memo: MemoDetail }>({ queryKey: ["memo"] });
+
+      clearTrashMemoLists(queryClient);
+      for (const [queryKey] of previousMemoDetails) {
+        if (queryKey[2] === "trash") {
+          queryClient.removeQueries({ queryKey });
+        }
+      }
+
+      return { previousMemoLists, previousMemoDetails, previousActivePane: activePane, previousSelectedMemoId: selectedMemoId };
+    },
+    onError: (_error, _variables, context) => {
+      context?.previousMemoLists.forEach(([queryKey, data]) => {
+        queryClient.setQueryData(queryKey, data);
+      });
+      context?.previousMemoDetails.forEach(([queryKey, data]) => {
+        queryClient.setQueryData(queryKey, data);
+      });
+      setSelectedMemoId(context?.previousSelectedMemoId ?? null);
+      setActivePane(context?.previousActivePane ?? "memos");
+      setAppNoticeDialog({
+        title: t("workspaceDialogs.emptyTrashFailedTitle"),
+        description: t("workspaceDialogs.emptyTrashFailedDescription"),
+      });
+    },
+    onSettled: (_data, error) => {
+      const refetchType = error ? "active" : "inactive";
+
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["memos"], refetchType }),
+        queryClient.invalidateQueries({ queryKey: ["memo"], refetchType }),
+        queryClient.invalidateQueries({ queryKey: ["resources"], refetchType }),
       ]);
     },
   });
@@ -1922,7 +1983,10 @@ export const WorkspaceApp = ({
 
   const handleOpenTags = () => {
     clearHiddenMobileSearch();
-    setTagsOpen(true);
+    skipNextHomeRouteSyncRef.current = location.pathname !== "/";
+    navigateWorkspaceHome();
+    setRightView("tags");
+    setActivePane("editor");
   };
 
   const handleOpenTemplates = () => {
@@ -2028,8 +2092,8 @@ export const WorkspaceApp = ({
       return true;
     }
 
-    if (tagsOpen) {
-      setTagsOpen(false);
+    if (rightView === "tags") {
+      handleCloseAssets();
       return true;
     }
 
@@ -2074,7 +2138,6 @@ export const WorkspaceApp = ({
 	    mobileSearchActive,
     notebookDeleteConfirmation,
     notebookNameDialog,
-    tagsOpen,
     templatesOpen,
     updateNotebookMutation.isPending,
   ]);
@@ -2130,7 +2193,6 @@ export const WorkspaceApp = ({
           mobileNotebookPickerOpen ||
           notebookDeleteConfirmation ||
           notebookNameDialog ||
-          tagsOpen ||
           templatesOpen
       );
 
@@ -2197,7 +2259,6 @@ export const WorkspaceApp = ({
     notebookDeleteConfirmation,
     notebookNameDialog,
     selectedMemoId,
-    tagsOpen,
     templatesOpen,
   ]);
 
@@ -2276,6 +2337,8 @@ export const WorkspaceApp = ({
       ? t("workspace.loading.settings")
       : rightView === "assets"
         ? t("workspace.loading.assets")
+        : rightView === "tags"
+          ? t("workspace.loading.tags")
         : rightView === "evernote-migration"
           ? t("workspace.loading.migration")
           : t("workspace.loading.editor");
@@ -2346,16 +2409,7 @@ export const WorkspaceApp = ({
                   onDeleteNotebook={handleDeleteNotebook}
                   onMoveNotebook={handleMoveNotebook}
                   onMoveMemos={handleMoveDraggedMemos}
-                  onBackToList={() => {
-                    navigateWorkspaceHome();
-                    if (memoView === "trash") {
-                      setMemoView("notebook");
-                    }
-                    setSelectedNotebookId(null);
-                    clearMemoSelection();
-                    setRightView("editor");
-                    setActivePane("memos");
-                  }}
+                  onBackToList={handleSelectAllMemos}
                   onLogout={onLogout}
                   isLoggingOut={isLoggingOut}
                   imageCompressionEnabled={imageCompressionEnabled}
@@ -2368,7 +2422,7 @@ export const WorkspaceApp = ({
                   onOpenTags={handleOpenTags}
                   onOpenSettings={handleOpenSettings}
                   onOpenTrash={() => {
-                    navigateWorkspaceHome();
+                    navigateWorkspaceTrash();
                     setMemoView("trash");
                     setSelectedNotebookId(null);
                     setMobileBottomNavActive("home");
@@ -2434,7 +2488,7 @@ export const WorkspaceApp = ({
               isSyncingMemos={isManualMemoSyncing || isSyncingQueuedChanges || isPullRefreshing || memosQuery.isRefetching}
               canSyncMemos={isOnline}
               onOpenTrash={() => {
-                navigateWorkspaceHome();
+                navigateWorkspaceTrash();
                 setMemoView("trash");
                 setSelectedNotebookId(null);
                 setMobileBottomNavActive("home");
@@ -2444,6 +2498,7 @@ export const WorkspaceApp = ({
                 setSelectedMemoId(null);
                 setActivePane("memos");
               }}
+              onBackFromTrash={handleSelectAllMemos}
               onOpenMemo={(memoId) => {
                 navigateWorkspaceHome();
                 setRightView("editor");
@@ -2520,6 +2575,8 @@ export const WorkspaceApp = ({
                   />
                 ) : rightView === "assets" ? (
                   <AssetsPane onClose={handleCloseAssets} activeMemo={selectedMemo} />
+                ) : rightView === "tags" ? (
+                  <TagsPane onClose={handleCloseAssets} />
                 ) : rightView === "evernote-migration" ? (
                   <EvernoteImportGuidePane onClose={() => setRightView("settings")} />
                 ) : (
@@ -2579,11 +2636,6 @@ export const WorkspaceApp = ({
         </main>
       </div>
 
-      {tagsOpen && (
-        <Suspense fallback={null}>
-          <TagsDialog onClose={() => setTagsOpen(false)} />
-        </Suspense>
-      )}
       {templatesOpen && (
         <Suspense fallback={null}>
           <TemplatesDialog

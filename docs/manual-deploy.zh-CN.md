@@ -1,6 +1,6 @@
 # Cloudflare 手动部署指南
 
-如果你熟悉 Cloudflare 和命令行，或者想自定义/精细控制部署流程，可以按照以下指南进行手动部署与后续更新。
+如果你熟悉 Cloudflare 和命令行，或者想自定义/精细控制首次安装与资源配置，可以按照以下指南进行手动部署。日常更新统一由 Cloudflare Workers Builds 完成；本地部署仅用于首次安装和紧急修复。
 
 > 💡 **提示**：如果是通过 AI 助手（Claude Code、Codex、Antigravity、Cursor、Trae 等）进行部署，AI 助手应优先参考 [AI Agent Cloudflare Deployment](https://github.com/tianma-if/edgeever/blob/main/docs/agent-deploy-cloudflare.md) 约定。
 
@@ -68,18 +68,14 @@ bun run deploy
 
 ---
 
-## 更新到最新版
+## 开启自动更新
 
-当官方仓库发布新版本时，如果你的实例是通过 Fork 部署的，可以按照以下步骤拉取最新代码并更新：
+首次部署后，必须将 Worker 连接到 Fork 的 `main` 分支；Cloudflare Workers Builds 是所有 EdgeEver 实例的标准生产发布路径。请先按 [Cloudflare Workers Builds 自动部署](cloudflare-workers-builds.zh-CN.md) 创建仅供配置使用的 **User API Token**（不是 Account API Token），将它私下写入 `.env.local` 的 `EDGE_EVER_BUILDS_API_TOKEN`，然后执行：
 
-1. 打开你自己的 EdgeEver Fork 仓库页面。
-2. 点击页面上的 **Sync fork**，将官方仓库的最新代码同步到你的 Fork。
-3. 在本地项目目录中拉取更新并重新部署：
-   ```sh
-   git pull
-   bun install
-   bun run deploy:doctor
-   bun run deploy
-   ```
+```sh
+bun run deploy:builds:setup
+```
 
-> ⚠️ **注意**：同步 Fork 仅仅更新了你 GitHub 仓库里的代码，并不会自动更新已经部署在 Cloudflare 的 Worker/Pages 实例。必须在本地（或通过 Agent）重新执行部署命令，更新才会生效。
+该命令会配置 Git 仓库连接、生产触发器、构建变量和 D1 migration 所需的部署 token。完成后，只需在 Fork 页面点击 **Sync fork**，或推送到 `main`；Cloudflare 会自动构建 Web、应用新的远程 D1 migration 并发布 Worker。不需要 GitHub Actions Secrets，也不需要本地重新部署。
+
+请保留 `bun run deploy` 作为首次安装和紧急修复的入口。

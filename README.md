@@ -25,26 +25,31 @@ The public demo resets daily and restores sample notes. Do not store private con
 
 ### Deploy with an AI Agent
 
-Copy this prompt into your AI coding assistant, such as Claude Code, Codex, Antigravity, Cursor, or Trae:
+Copy this prompt into your AI coding assistant, such as Claude Code, Codex, Antigravity, Cursor, or Trae. It covers the first installation and the automatic-update setup:
 
-**Recommendation:** Before deployment, configure GitHub and Cloudflare MCP servers, plugins, or other supported integrations for your AI Agent. This allows it to fork the repository, create the required Cloudflare resources, and deploy the application.
+**Recommendation:** Before deployment, configure GitHub and Cloudflare MCP servers, plugins, or other supported integrations for your AI Agent. This allows it to fork the repository, create the required Cloudflare resources, deploy the application, and connect the instance to Cloudflare Workers Builds.
 
 ```text
 Please follow these steps:
 1. Fork the EdgeEver upstream repository: https://github.com/tianma-if/edgeever
-2. Use the forked repository to install and deploy EdgeEver to Cloudflare.
-3. Configure a mechanism for the fork to sync updates from the upstream repository, so it can receive the latest product features periodically or on demand.
+2. Use the forked repository to create the Cloudflare resources and complete EdgeEver's first deployment.
+3. Run `bun run deploy:builds:setup` to connect the deployed Worker to the fork's `main` branch through Cloudflare Workers Builds. If setup needs a token, use a User API Token, not an Account API Token.
+4. After that, GitHub Sync fork or any push to `main` must automatically build, apply D1 migrations, and deploy the instance.
 ```
 
 Agents should follow [AI Agent Cloudflare Deployment](docs/agent-deploy-cloudflare.md).
 
+After the first deployment, see [Cloudflare Workers Builds](docs/cloudflare-workers-builds.md) for automatic updates. The same deployment flow is used by official instances and forks.
+
 > Common pitfall: Cloudflare R2, D1, and Workers may still require a Visa card during activation or usage, even when you stay within the free quotas.
+
+<p align="center">or</p>
 
 ### Manual Deployment
 
-Please refer to the [Cloudflare Manual Deployment Guide](docs/manual-deploy.md) for step-by-step instructions on manual installation and updating.
+Please refer to the [Cloudflare Manual Deployment Guide](docs/manual-deploy.md) for first-time manual installation, Cloudflare resource setup, and emergency recovery. After the first deployment, connect Workers Builds; future updates arrive through GitHub **Sync fork** or pushes to `main`.
 
-The automated helper commands are recommended. If you create the Cloudflare resources manually, finish configuring `.env.local`—including the D1 ID, R2 bucket, password hash, and the 400-day session limit—before running `bun run deploy`.
+The automated helper commands are recommended. If you create the Cloudflare resources manually, finish configuring `.env.local`—including the D1 ID, R2 bucket, password hash, and the 400-day session limit—before running `bun run deploy`. Use that command only for first installation and emergency recovery; Workers Builds handles routine updates.
 
 
 ## Features
@@ -56,18 +61,24 @@ The automated helper commands are recommended. If you create the Cloudflare reso
 - Three-pane layout: notebook tree, note list, and main editor.
 - Unlimited nested notebooks.
 - Rich text editing.
+- Switch between Markdown source and rich text views on desktop.
 - Note version history for reviewing previous content changes.
 - Local browser-side image compression before upload, often reducing screenshots and large photos by about 50%-90%.
 - Batch note merging.
 - Batch note moving, notebook drag sorting, and hierarchy editing.
 - Offline drafts and local sync queue for existing notes.
 - Single-user login with PBKDF2-SHA256 password hashing.
+- Chrome/Edge web clipper is complete and pending store publication.
 
 ## PWA Installation
 
 EdgeEver can be installed as a PWA on desktop or mobile home screens. On desktop, open the site in Chrome or Edge and use the install icon in the address bar. On Android, open it in Chrome, use the three-dot menu, and choose **Add to Home screen** or **Install**. Avoid installing from embedded browsers such as WeChat.
 
 > Common pitfall: When installing the PWA on mobile, Chrome or Edge is recommended. Other mobile browsers may encounter compatibility issues or unexpected errors during installation.
+
+## Chrome/Edge Web Clipper
+
+The Chrome/Edge web clipper is complete and pending store publication.
 
 ## Native Clients
 
@@ -81,6 +92,7 @@ The goal is to let users connect these clients to their own self-hosted EdgeEver
 - Official site: Astro static site in `apps/site`, deployable to Cloudflare Pages.
 - Frontend: Vite, React, React Router, TanStack Query, Tailwind CSS, shadcn/ui, and Radix UI.
 - Editor: TipTap / ProseMirror with Markdown support; PWA uses vite-plugin-pwa, Workbox, and Dexie.
+- Web clipper: Manifest V3, Mozilla Readability, and Turndown for Chrome and Microsoft Edge.
 - Backend: Cloudflare Workers, Hono, Zod, D1, and R2, with REST API, OpenAPI, and Remote MCP.
 
 ## Quick Start
@@ -114,6 +126,7 @@ bun run build
 
 ```text
 apps/web          Vite + React frontend, PWA, offline drafts, and sync queue
+apps/extension    Chrome/Edge Manifest V3 web clipper
 apps/api          Cloudflare Worker + Hono API, OpenAPI, MCP endpoint
 apps/mobile       Expo + React Native mobile app
 apps/site         Astro official website, deployable independently
