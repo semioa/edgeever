@@ -20,19 +20,13 @@ const copy = siteCopy[locale].hero;
 
   <div class="md:order-1 relative z-10 w-full">
     {copy.badgeText && (
-      <a
-        href={`${getLocalizedPath(locale, "/")}blog?tag=migration`}
-        class="inline-flex items-center gap-2 px-3.5 py-1 mb-6 text-xs text-brand bg-brand/5 border border-brand-border/30 hover:border-brand/40 hover:bg-brand/10 rounded-full backdrop-blur-sm select-none hover:-translate-y-0.5 transition-all duration-300 group/badge cursor-pointer"
-      >
+      <div class="mb-6 inline-flex items-center gap-2 rounded-full border border-brand-border/30 bg-brand/5 px-3.5 py-1 text-xs text-brand backdrop-blur-sm">
         <span class="relative flex h-2 w-2">
           <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand opacity-75"></span>
           <span class="relative inline-flex rounded-full h-2 w-2 bg-brand"></span>
         </span>
-        <span class="text-slate-600 font-medium group-hover/badge:text-brand transition-colors">{copy.badgeText}</span>
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="w-3 h-3 text-slate-400 group-hover/badge:text-brand transition-all duration-300 transform group-hover/badge:translate-x-0.5">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-        </svg>
-      </a>
+        <span class="font-medium text-slate-600">{copy.badgeText}</span>
+      </div>
     )}
     <h1 class="text-4xl md:text-5xl xl:text-6xl font-bold text-slate-900 leading-tight">
       <span class="text-gradient">EdgeEver</span>
@@ -67,6 +61,17 @@ const copy = siteCopy[locale].hero;
         {copy.agentInstall}
       </a>
     </div>
+
+    <ul class="mt-7 flex flex-wrap gap-x-5 gap-y-3" aria-label={locale === "zh-CN" ? "EdgeEver 核心能力" : "EdgeEver core capabilities"}>
+      {copy.proofs.map((proof) => (
+        <li class="flex items-center gap-2 text-sm font-medium text-slate-600">
+          <span class="flex h-5 w-5 items-center justify-center rounded-full bg-brand-muted text-brand-text">
+            <Icon name="bx:bx-check" class="h-3.5 w-3.5" />
+          </span>
+          {proof}
+        </li>
+      ))}
+    </ul>
   </div>
 
   <div class="py-3 md:order-2 hidden md:flex relative w-full max-w-lg justify-center z-10">
