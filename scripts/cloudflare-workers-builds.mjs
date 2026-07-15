@@ -98,6 +98,7 @@ const buildVariables = () => {
     "R2_BUCKET_NAME",
     "R2_PREVIEW_BUCKET_NAME",
     "AUTH_USERNAME",
+    "AUTH_PASSWORD",
     "AUTH_PASSWORD_HASH",
     "SESSION_TTL_DAYS",
     "DEMO_MODE",
@@ -115,13 +116,13 @@ const buildVariables = () => {
     if (current) entries.push([key, current]);
   }
 
-  if (!entries.some(([key]) => key.endsWith("AUTH_PASSWORD_HASH"))) {
-    throw new Error("Missing EDGE_EVER_AUTH_PASSWORD_HASH. Run deploy:setup before configuring Workers Builds.");
+  if (!entries.some(([key]) => key.endsWith("AUTH_PASSWORD") || key.endsWith("AUTH_PASSWORD_HASH"))) {
+    throw new Error("Missing EDGE_EVER_AUTH_PASSWORD or EDGE_EVER_AUTH_PASSWORD_HASH. Run deploy:setup before configuring Workers Builds.");
   }
 
   return Object.fromEntries(entries.map(([key, current]) => [key, {
     value: current.replace(/\\\$/g, "$"),
-    is_secret: key.endsWith("AUTH_PASSWORD_HASH"),
+    is_secret: key.endsWith("AUTH_PASSWORD") || key.endsWith("AUTH_PASSWORD_HASH"),
   }]));
 };
 
@@ -150,18 +151,26 @@ const triggerPayload = (workerTag, repoConnectionUuid, buildTokenUuid) => ({
 const configurePagesWatchPaths = async () => {
   if (!pagesProjectName) return;
 
-  await request("PATCH", `/accounts/${accountId}/pages/projects/${encodeURIComponent(pagesProjectName)}`, {
-    source: {
-      config: {
-        // `*` spans nested directories in Cloudflare Pages. Root lockfiles and
-        // package metadata are shared build inputs, so they intentionally trigger
-        // both projects when changed.
-        path_includes: ["apps/site/*", "bun.lock", "package.json"],
-        path_excludes: [],
+  try {
+    await request("PATCH", `/accounts/${accountId}/pages/projects/${encodeURIComponent(pagesProjectName)}`, {
+      source: {
+        config: {
+          // `*` spans nested directories in Cloudflare Pages. Root lockfiles and
+          // package metadata are shared build inputs, so they intentionally trigger
+          // both projects when changed.
+          path_includes: ["apps/site/*", "bun.lock", "package.json"],
+          path_excludes: [],
+        },
       },
-    },
-  });
-  console.log(`[ok] configured Pages watch paths for ${pagesProjectName}`);
+    });
+    console.log(`[ok] configured Pages watch paths for ${pagesProjectName}`);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("Direct Uploads project")) {
+      console.log(`[skip] ${pagesProjectName} is a Direct Upload Pages project; its deploy workflow already controls path filtering.`);
+      return;
+    }
+    throw error;
+  }
 };
 
 const setup = async () => {

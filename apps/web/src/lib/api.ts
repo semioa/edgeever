@@ -1,7 +1,11 @@
 import type {
   AuthSession,
+  InstanceUser,
   ApiToken,
   CreatedApiToken,
+  JsonBackupMemo,
+  JsonBackupNotebook,
+  JsonBackupRevision,
   MemoDetail,
   MemoEditSession,
   MemoRevision,
@@ -43,6 +47,9 @@ type ListApiTokensResponse = {
   availableScopes: string[];
 };
 
+type ListUsersResponse = { users: InstanceUser[] };
+type UserResponse = { user: InstanceUser };
+
 type MemoResponse = {
   memo: MemoDetail;
 };
@@ -53,6 +60,17 @@ type NotebookResponse = {
 
 type ResourceResponse = {
   resource: Resource;
+};
+
+export type MarkdownExportPage = {
+  memos: MemoDetail[];
+  resources: Resource[];
+  totalCount: number;
+  nextOffset: number | null;
+};
+
+export type JsonBackupPage = MarkdownExportPage & {
+  revisions: JsonBackupRevision[];
 };
 
 export class ApiRequestError extends Error {
@@ -110,6 +128,20 @@ export const api = {
   changePassword: (payload: { currentPassword: string; newPassword: string; confirmPassword: string }) =>
     request<{ ok: true }>("/api/v1/auth/change-password", {
       method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  listUsers: () => request<ListUsersResponse>("/api/v1/users"),
+
+  createUser: (payload: { username: string; displayName?: string | null; password: string }) =>
+    request<UserResponse>("/api/v1/users", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  updateUser: (userId: string, payload: { displayName?: string | null; password?: string; isDisabled?: boolean }) =>
+    request<UserResponse>(`/api/v1/users/${userId}`, {
+      method: "PATCH",
       body: JSON.stringify(payload),
     }),
 
@@ -256,6 +288,48 @@ export const api = {
     }),
 
   listResources: () => request<ListResourcesResponse>("/api/v1/resources"),
+
+  getMarkdownExportPage: (offset = 0, limit = 50) =>
+    request<MarkdownExportPage>(`/api/v1/exports/markdown?offset=${offset}&limit=${limit}`),
+
+  getJsonBackupPage: (offset = 0, limit = 25) =>
+    request<JsonBackupPage>(`/api/v1/backups/json?offset=${offset}&limit=${limit}`),
+
+  restoreJsonNotebooks: (notebooks: JsonBackupNotebook[]) =>
+    request<{ ok: true }>("/api/v1/restores/json/notebooks", {
+      method: "POST",
+      body: JSON.stringify({ notebooks }),
+    }),
+
+  restoreJsonMemos: (memos: JsonBackupMemo[]) =>
+    request<{ ok: true }>("/api/v1/restores/json/memos", {
+      method: "POST",
+      body: JSON.stringify({ memos }),
+    }),
+
+  restoreJsonResource: (resourceId: string, metadata: JsonBackupMemo["resources"][number], file: Blob) => {
+    const form = new FormData();
+    form.append("metadata", JSON.stringify(metadata));
+    form.append("file", file, metadata.filename || metadata.id);
+    return request<{ ok: true }>(`/api/v1/restores/json/resources/${encodeURIComponent(resourceId)}`, {
+      method: "PUT",
+      body: form,
+    });
+  },
+
+  getResourceBlob: async (resourceUrl: string) => {
+    const response = await fetch(resourceUrl, { credentials: "include" });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        window.dispatchEvent(new CustomEvent("edgeever:unauthorized"));
+      }
+
+      throw new ApiRequestError(response.statusText || "Resource download failed", response.status);
+    }
+
+    return response.blob();
+  },
 
   uploadMemoResource: (memoId: string, file: File) => {
     const form = new FormData();

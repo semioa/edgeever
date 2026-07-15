@@ -40,7 +40,9 @@ Cloudflare 有两项账号级授权，仓库脚本不能、也不应该绕过：
 
 Worker 触发器已经排除了仅发生在 `apps/site/*`、`apps/mobile/*`、`apps/extension/*`、`docs/*`、README 文件和 `.github/*` 中的变更。因此，仅改官网不会发布 EdgeEver Worker。
 
-如果这个仓库还部署了 Cloudflare Pages 官网，请设置 `EDGE_EVER_PAGES_PROJECT_NAME`，再重跑 `bun run deploy:builds:setup`。命令会将 Pages 的 Build watch paths 设为 `apps/site/*`、`bun.lock`、`package.json`；这样仅改产品代码不会重新构建官网。该可选步骤要求 User API Token 额外拥有 **Account** -> **Cloudflare Pages** -> **Edit**。不使用自动化时，在 **Pages 项目** -> **Settings** -> **Build** -> **Build watch paths** 填入同样的路径即可。
+如果这个仓库还部署了 **Git 集成** 的 Cloudflare Pages 官网，请设置 `EDGE_EVER_PAGES_PROJECT_NAME`，再重跑 `bun run deploy:builds:setup`。命令会将 Pages 的 Build watch paths 设为 `apps/site/*`、`bun.lock`、`package.json`；这样仅改产品代码不会重新构建官网。该可选步骤要求 User API Token 额外拥有 **Account** -> **Cloudflare Pages** -> **Edit**。不使用自动化时，在 **Pages 项目** -> **Settings** -> **Build** -> **Build watch paths** 填入同样的路径即可。
+
+Cloudflare 无法为 **Direct Upload（直接上传）** 类型的 Pages 项目设置 Build watch paths；此时应由部署工作流本身过滤路径。本仓库的 `.github/workflows/deploy-site.yml` 已只监听官网、文档及共享构建输入的改动，因此仅改笔记应用不会触发官网部署。
 
 ### 手动兜底
 
@@ -56,9 +58,9 @@ Worker 触发器已经排除了仅发生在 `apps/site/*`、`apps/mobile/*`、`a
    Deploy command: bun run deploy:cloudflare-builds
    ```
 
-5. 在 **Settings** -> **Builds** -> **Build variables and secrets** 中，填入初次部署时 `.env.local` 的实例配置；`EDGE_EVER_AUTH_PASSWORD_HASH` 必须保存为 Secret。
+5. 在 **Settings** -> **Builds** -> **Build variables and secrets** 中，填入初次部署时 `.env.local` 的实例配置；推荐将 `EDGE_EVER_AUTH_PASSWORD` 保存为 Build Secret。已有实例可继续将 `EDGE_EVER_AUTH_PASSWORD_HASH` 保存为 Build Secret。
 
-Dashboard 中选中的 Worker 必须与 `EDGE_EVER_WORKER_NAME` 对应。部署命令会根据这些变量生成临时 Wrangler 配置，因此严禁把 D1 ID、R2 bucket、路由或密码 hash 提交进仓库。
+Dashboard 中选中的 Worker 必须与 `EDGE_EVER_WORKER_NAME` 对应。部署命令会根据这些变量生成临时 Wrangler 配置，因此严禁把 D1 ID、R2 bucket、路由、密码或密码 hash 提交进仓库。
 
 ## 必需的构建变量
 
@@ -72,13 +74,15 @@ EDGE_EVER_D1_DATABASE_ID
 EDGE_EVER_R2_BUCKET_NAME
 EDGE_EVER_R2_PREVIEW_BUCKET_NAME
 EDGE_EVER_AUTH_USERNAME
-EDGE_EVER_AUTH_PASSWORD_HASH          # Build Secret
+EDGE_EVER_AUTH_PASSWORD               # Build Secret
 EDGE_EVER_SESSION_TTL_DAYS
 EDGE_EVER_DEMO_MODE                   # 可选
 EDGE_EVER_DEMO_RESET_CRON             # 可选
 EDGE_EVER_CUSTOM_DOMAIN               # 可选
 EDGE_EVER_ROUTE_PATTERN               # 可选
 ```
+
+已经使用 `EDGE_EVER_AUTH_PASSWORD_HASH` 的旧实例可以继续保留该变量，无需改成 `EDGE_EVER_AUTH_PASSWORD`。为兼容已有实例，两个变量同时存在时哈希优先。
 
 多实例场景则设置 `EDGE_EVER_INSTANCE`，并使用 `EDGE_EVER_PROD_D1_DATABASE_ID` 之类的带实例前缀变量。本地部署和 Workers Builds 使用相同的变量解析规则。
 

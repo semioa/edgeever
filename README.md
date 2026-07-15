@@ -19,7 +19,26 @@ EdgeEver fills that gap: familiar notes interaction, open data, API access, MCP 
 
 - Demo: [https://demo.edgeever.org](https://demo.edgeever.org)
 
-The public demo resets daily and restores sample notes. Do not store private content there.
+The public demo resets every Monday at 1:00 AM (China Standard Time) and restores sample notes. Do not store private content there.
+
+## Features
+
+- Serverless, 100% free, and zero maintenance: Built on Cloudflare's Serverless architecture, running entirely within free tiers. Store up to 150k notes and 50k images without any hosting fees.
+- Open data: notes are stored in Cloudflare D1, based on standard SQLite, and can be read and managed through REST API, MCP, and CLI without locking your data to a single notes product.
+- EdgeEver ZIP import and export: one archive combines human-readable Markdown, Front Matter, nested notebook structure, and relative-path attachments with versioned structured data and revision history for complete recovery between EdgeEver instances.
+- AI Agent friendly: built-in MCP support lets tools such as Codex, Claude Code, and Antigravity read, organize, and maintain notes, while enabling integrations with Notion databases and Feishu Bitable.
+- Uncapped multi-device sync: self-hosted API means no restrictive commercial limits on the number of active login devices, supporting seamless synchronization across PC, tablet, and mobile (via PWA or browser).
+- Three-pane layout: notebook tree, note list, and main editor.
+- Unlimited nested notebooks.
+- Rich text editing.
+- Switch between Markdown source and rich text views on desktop.
+- Note version history for reviewing previous content changes.
+- Local browser-side image compression before upload, often reducing screenshots and large photos by about 50%-90%.
+- Batch note merging.
+- Batch note moving, notebook drag sorting, and hierarchy editing.
+- Offline drafts and local sync queue for existing notes.
+- Multi-user instances with isolated personal workspaces, owner-managed accounts, and PBKDF2-SHA256 password hashing.
+- Chrome/Edge web clipper is complete and pending store publication.
 
 ## Deployment
 
@@ -49,26 +68,12 @@ After the first deployment, see [Cloudflare Workers Builds](docs/cloudflare-work
 
 Please refer to the [Cloudflare Manual Deployment Guide](docs/manual-deploy.md) for first-time manual installation, Cloudflare resource setup, and emergency recovery. After the first deployment, connect Workers Builds; future updates arrive through GitHub **Sync fork** or pushes to `main`.
 
-The automated helper commands are recommended. If you create the Cloudflare resources manually, finish configuring `.env.local`—including the D1 ID, R2 bucket, password hash, and the 400-day session limit—before running `bun run deploy`. Use that command only for first installation and emergency recovery; Workers Builds handles routine updates.
+The automated helper commands are recommended. The template uses `admin` / `admin123` for the initial login, and the password can be changed later in Personal Settings. If you create the Cloudflare resources manually, finish configuring `.env.local`—including the D1 ID, R2 bucket, and the 400-day session limit—before running `bun run deploy`. Existing installations that use `EDGE_EVER_AUTH_PASSWORD_HASH` remain supported. Use that command only for first installation and emergency recovery; Workers Builds handles routine updates.
 
 
-## Features
+## Multi-user Instances
 
-- Serverless, 100% free, and zero maintenance: Built on Cloudflare's Serverless architecture, running entirely within free tiers. Store up to 150k notes and 50k images without any hosting fees.
-- Open data: notes are stored in Cloudflare D1, based on standard SQLite, and can be read through REST API, MCP, and CLI.
-- AI Agent friendly: built-in MCP support lets tools such as Codex, Claude Code, and Antigravity read, organize, and maintain notes, while enabling integrations with Notion databases and Feishu Bitable.
-- Uncapped multi-device sync: self-hosted API means no restrictive commercial limits on the number of active login devices, supporting seamless synchronization across PC, tablet, and mobile (via PWA or browser).
-- Three-pane layout: notebook tree, note list, and main editor.
-- Unlimited nested notebooks.
-- Rich text editing.
-- Switch between Markdown source and rich text views on desktop.
-- Note version history for reviewing previous content changes.
-- Local browser-side image compression before upload, often reducing screenshots and large photos by about 50%-90%.
-- Batch note merging.
-- Batch note moving, notebook drag sorting, and hierarchy editing.
-- Offline drafts and local sync queue for existing notes.
-- Single-user login with PBKDF2-SHA256 password hashing.
-- Chrome/Edge web clipper is complete and pending store publication.
+The instance owner can create, disable, and reset member accounts in **Profile** -> **User accounts**. Public registration is disabled. Every member gets an isolated personal workspace, including notebooks, notes, attachments, Trash, imports/exports, and MCP tokens. Existing single-user installations are migrated automatically: all existing data remains in the original owner's default workspace. Cloudflare free-tier quotas are shared by the whole instance rather than allocated per user.
 
 ## PWA Installation
 
@@ -109,6 +114,12 @@ Apply local D1 migrations:
 bun run db:migrate:local
 ```
 
+For a fully local development environment, run the command below. It applies pending local migrations and initializes the local D1/R2 stores once with the repository's fixed demo seed. Existing local changes are preserved on later restarts.
+
+```sh
+bun run dev:local
+```
+
 Start local development:
 
 ```sh
@@ -147,6 +158,8 @@ content_json      TipTap/ProseMirror document, the editor source of truth
 content_markdown  API, Agent, import, and export format
 content_text      Search, summary, and indexing text
 ```
+
+Open **Profile** -> **Import and export** to export or import an EdgeEver ZIP. Its `notes/` directory is directly readable and portable as Markdown, while its structured data supports complete recovery between EdgeEver instances. Import preserves unrelated target data and overwrites records with matching EdgeEver IDs.
 
 ## API
 

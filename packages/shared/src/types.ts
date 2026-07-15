@@ -117,6 +117,13 @@ export type AuthUser = {
   id: string;
   username: string;
   displayName: string | null;
+  role: "owner" | "member";
+};
+
+export type InstanceUser = AuthUser & {
+  isDisabled: boolean;
+  lastLoginAt: string | null;
+  createdAt: string;
 };
 
 export type AuthSession = {

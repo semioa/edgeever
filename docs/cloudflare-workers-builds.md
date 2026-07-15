@@ -39,7 +39,9 @@ This token is used only by `bun run deploy:builds:setup` and is never uploaded t
 
 The Worker trigger already ignores changes limited to `apps/site/*`, `apps/mobile/*`, `apps/extension/*`, `docs/*`, README files, and `.github/*`. Thus a website-only change does not deploy the EdgeEver Worker.
 
-For a Cloudflare Pages project in this repository, set `EDGE_EVER_PAGES_PROJECT_NAME` and rerun `bun run deploy:builds:setup`. The command configures Pages Build watch paths to `apps/site/*`, `bun.lock`, and `package.json`, so product-only changes do not rebuild the website. This optional step requires the User API Token to additionally have **Account** -> **Cloudflare Pages** -> **Edit**. Without automation, set the same paths in **Pages project** -> **Settings** -> **Build** -> **Build watch paths**.
+For a Git-integrated Cloudflare Pages project, set `EDGE_EVER_PAGES_PROJECT_NAME` and rerun `bun run deploy:builds:setup`. The command configures Pages Build watch paths to `apps/site/*`, `bun.lock`, and `package.json`, so product-only changes do not rebuild the website. This optional step requires the User API Token to additionally have **Account** -> **Cloudflare Pages** -> **Edit**. Without automation, set the same paths in **Pages project** -> **Settings** -> **Build** -> **Build watch paths**.
+
+Cloudflare cannot set Build watch paths on a **Direct Upload** Pages project. In that case, keep the filter in the deploy workflow instead. This repository's `.github/workflows/deploy-site.yml` already runs only for website/docs/shared-build-input changes, so application-only changes do not deploy the official site.
 
 ### Manual fallback
 
@@ -55,9 +57,9 @@ If the command cannot be used, configure the Worker in the Cloudflare dashboard:
    Deploy command: bun run deploy:cloudflare-builds
    ```
 
-5. Add the instance values from `.env.local` under **Settings** -> **Builds** -> **Build variables and secrets**. Use a secret for `EDGE_EVER_AUTH_PASSWORD_HASH`.
+5. Add the instance values from `.env.local` under **Settings** -> **Builds** -> **Build variables and secrets**. Store `EDGE_EVER_AUTH_PASSWORD` as a Build Secret. Existing installations may keep using `EDGE_EVER_AUTH_PASSWORD_HASH` as a Build Secret.
 
-The Worker selected in the dashboard must be the one named by `EDGE_EVER_WORKER_NAME`. The deployment command creates a temporary Wrangler configuration from these variables, so do not commit a D1 ID, R2 bucket name, route, or password hash.
+The Worker selected in the dashboard must be the one named by `EDGE_EVER_WORKER_NAME`. The deployment command creates a temporary Wrangler configuration from these variables, so do not commit a D1 ID, R2 bucket name, route, password, or password hash.
 
 ## Required Build Variables
 
@@ -71,13 +73,15 @@ EDGE_EVER_D1_DATABASE_ID
 EDGE_EVER_R2_BUCKET_NAME
 EDGE_EVER_R2_PREVIEW_BUCKET_NAME
 EDGE_EVER_AUTH_USERNAME
-EDGE_EVER_AUTH_PASSWORD_HASH          # Build Secret
+EDGE_EVER_AUTH_PASSWORD               # Build Secret
 EDGE_EVER_SESSION_TTL_DAYS
 EDGE_EVER_DEMO_MODE                   # optional
 EDGE_EVER_DEMO_RESET_CRON             # optional
 EDGE_EVER_CUSTOM_DOMAIN               # optional
 EDGE_EVER_ROUTE_PATTERN               # optional
 ```
+
+Existing installations that already use `EDGE_EVER_AUTH_PASSWORD_HASH` may keep it instead of `EDGE_EVER_AUTH_PASSWORD`. If both are present, the hash takes precedence for backward compatibility.
 
 For a multi-instance configuration, set `EDGE_EVER_INSTANCE` and the matching scoped variables such as `EDGE_EVER_PROD_D1_DATABASE_ID` instead. The same resolution rules apply in local deployment and Workers Builds.
 
