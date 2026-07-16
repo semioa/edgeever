@@ -304,6 +304,8 @@ export const zhCN = {
     deletedCount: "{{count}} 条已删除",
     constrainedCount: "{{label}} · {{count}} 条",
     searchConstraint: "搜索「{{query}}」",
+    searchActive: "正在搜索",
+    searchResults: "{{count}} 条结果",
     filterConstraint: "筛选：{{label}}",
     reset: "重置",
     fetchingLatest: "正在拉取最新笔记",
