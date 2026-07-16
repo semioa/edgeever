@@ -51,6 +51,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { cors } from "hono/cors";
 import openApiSpec from "../../../docs/openapi.json";
 import { hasBootstrapCredential, verifyBootstrapPassword } from "./auth-bootstrap";
+import { isDemoModeEnabled, resolveDemoPasswordHash } from "./demo-mode";
 
 type Bindings = {
   DB: D1Database;
@@ -431,6 +432,7 @@ app.get("/api/v1/auth/session", async (c) => {
     return c.json({
       authRequired: false,
       authenticated: true,
+      demoMode: isDemoMode(c.env),
       user: {
         id: "local",
         username: "owner",
@@ -445,6 +447,7 @@ app.get("/api/v1/auth/session", async (c) => {
   return c.json({
     authRequired: true,
     authenticated: Boolean(auth && auth.kind === "user"),
+    demoMode: isDemoMode(c.env),
     user:
       auth && auth.kind === "user"
         ? {
@@ -483,6 +486,7 @@ app.post("/api/v1/auth/login", zValidator("json", LoginSchema), async (c) => {
   return c.json({
     authRequired: true,
     authenticated: true,
+    demoMode: isDemoMode(c.env),
     sessionToken: session.token,
     user: {
       id: user.id,
@@ -498,6 +502,10 @@ app.post("/api/v1/auth/change-password", zValidator("json", ChangePasswordSchema
 
   if (!auth || auth.kind !== "user" || !auth.actorId || !auth.sessionId) {
     return unauthorized(c, "An interactive user session is required.");
+  }
+
+  if (isDemoMode(c.env)) {
+    return forbidden(c, "The demo environment does not allow changing login passwords.");
   }
 
   const input = c.req.valid("json");
@@ -4926,7 +4934,7 @@ const emptyTrashMemosRecord = async (
   return deleted;
 };
 
-const isDemoMode = (env: Bindings) => env.EDGE_EVER_DEMO_MODE?.trim().toLowerCase() === "true";
+const isDemoMode = (env: Bindings) => isDemoModeEnabled(env.EDGE_EVER_DEMO_MODE);
 const isLocalDemoSeedEnabled = (env: Bindings) =>
   env.EDGE_EVER_LOCAL_DEMO_SEED?.trim().toLowerCase() === "true";
 
@@ -5127,6 +5135,13 @@ const ensureDemoSeed = async (env: Bindings, options: { refreshResources?: boole
 
 const resetDemoData = async (env: Bindings, scheduledTime: number) => {
   const db = env.DB;
+  const now = isoNow();
+  const demoUsername = env.EDGE_EVER_AUTH_USERNAME?.trim() || "admin";
+  const demoPasswordHash = await resolveDemoPasswordHash(
+    env.EDGE_EVER_AUTH_PASSWORD,
+    env.EDGE_EVER_AUTH_PASSWORD_HASH,
+    hashPassword,
+  );
   const memoPlaceholders = DEMO_SEED_MEMO_IDS.map(() => "?").join(", ");
   const notebookPlaceholders = DEMO_SEED_NOTEBOOK_IDS.map(() => "?").join(", ");
   const resourceRows = await db.prepare(`SELECT object_key FROM resources`).all<{ object_key: string }>();
@@ -5136,7 +5151,7 @@ const resetDemoData = async (env: Bindings, scheduledTime: number) => {
     await env.RESOURCES.delete(objectKeys.slice(index, index + 1000));
   }
 
-  await db.batch([
+  const resetStatements: D1PreparedStatement[] = [
     db.prepare(`DELETE FROM memos_fts`),
     db.prepare(`DELETE FROM resources`),
     db.prepare(`DELETE FROM memo_revisions`),
@@ -5146,7 +5161,21 @@ const resetDemoData = async (env: Bindings, scheduledTime: number) => {
     db.prepare(`DELETE FROM notebooks WHERE id NOT IN (${notebookPlaceholders})`).bind(...DEMO_SEED_NOTEBOOK_IDS),
     db.prepare(`DELETE FROM api_tokens`),
     db.prepare(`DELETE FROM audit_events`),
-  ]);
+  ];
+
+  if (demoPasswordHash) {
+    resetStatements.push(
+      db.prepare(`UPDATE users SET password_hash = ?, updated_at = ? WHERE username = ? AND is_disabled = 0`)
+        .bind(demoPasswordHash, now, demoUsername),
+      db.prepare(
+        `UPDATE sessions SET revoked_at = ?
+         WHERE user_id IN (SELECT id FROM users WHERE username = ? AND is_disabled = 0)
+           AND revoked_at IS NULL`
+      ).bind(now, demoUsername),
+    );
+  }
+
+  await db.batch(resetStatements);
 
   await ensureDemoSeed(env, { refreshResources: true });
   await audit(db, "system", null, "demo.reset", "demo", "edgeever-demo", {

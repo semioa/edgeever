@@ -44,7 +44,7 @@ The public demo resets every Monday at 1:00 AM (China Standard Time) and restore
 
 ### Deploy with an AI Agent
 
-Copy this prompt into your AI coding assistant, such as Claude Code, Codex, Antigravity, Cursor, or Trae. It covers the first installation and the automatic-update setup:
+Copy this prompt into your AI coding assistant, such as Claude Code, Codex, OpenClaw, Antigravity, Cursor, or Trae. It covers the first installation and the automatic-update setup:
 
 **Recommendation:** Before deployment, configure GitHub and Cloudflare MCP servers, plugins, or other supported integrations for your AI Agent. This allows it to fork the repository, create the required Cloudflare resources, deploy the application, and connect the instance to Cloudflare Workers Builds.
 
@@ -71,9 +71,12 @@ Please refer to the [Cloudflare Manual Deployment Guide](docs/manual-deploy.md) 
 The automated helper commands are recommended. The template uses `admin` / `admin123` for the initial login, and the password can be changed later in Personal Settings. If you create the Cloudflare resources manually, finish configuring `.env.local`—including the D1 ID, R2 bucket, and the 400-day session limit—before running `bun run deploy`. Existing installations that use `EDGE_EVER_AUTH_PASSWORD_HASH` remain supported. Use that command only for first installation and emergency recovery; Workers Builds handles routine updates.
 
 
-## Multi-user Instances
+## Multi-Account Login
 
-The instance owner can create, disable, and reset member accounts in **Profile** -> **User accounts**. Public registration is disabled. Every member gets an isolated personal workspace, including notebooks, notes, attachments, Trash, imports/exports, and MCP tokens. Existing single-user installations are migrated automatically: all existing data remains in the original owner's default workspace. Cloudflare free-tier quotas are shared by the whole instance rather than allocated per user.
+Once deployed, a single instance supports multi-account login.
+
+The instance administrator can create, disable, or reset member accounts in **Profile** -> **User accounts**. Each member gets a fully isolated personal workspace, including notebooks, notes, attachments, Trash, import/export, and MCP tokens.
+
 
 ## PWA Installation
 
@@ -114,16 +117,16 @@ Apply local D1 migrations:
 bun run db:migrate:local
 ```
 
-For a fully local development environment, run the command below. It applies pending local migrations and initializes the local D1/R2 stores once with the repository's fixed demo seed. Existing local changes are preserved on later restarts.
-
-```sh
-bun run dev:local
-```
-
-Start local development:
+Start the default development environment. It applies pending local migrations and initializes local D1/R2 stores once with the repository's fixed demo seed. Existing local changes are preserved on later restarts, and no remote instance is contacted.
 
 ```sh
 bun run dev
+```
+
+To intentionally develop against a configured remote instance, select it explicitly:
+
+```sh
+EDGE_EVER_INSTANCE=<name> bun run dev:remote
 ```
 
 Checks:

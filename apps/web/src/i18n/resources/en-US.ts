@@ -147,6 +147,12 @@ export const enUS = {
     themeDark: "Dark",
     themeToggleToDark: "Switch to dark mode",
     themeToggleToLight: "Switch to light mode",
+    tabs: {
+      general: "General",
+      data: "Data Management",
+      ai: "AI Integrations",
+      account: "Login Settings",
+    },
   },
   systemInfo: {
     title: "System info",
@@ -543,12 +549,12 @@ export const enUS = {
     logout: "Sign out",
   },
   users: {
-    title: "User accounts",
+    title: "Members",
     description: "Create isolated personal note spaces for family or team members. Public registration stays disabled.",
     loading: "Loading accounts...",
-    create: "Create account",
+    create: "Add member",
     creating: "Creating...",
-    createTitle: "Create account",
+    createTitle: "Add new member",
     createDescription: "The account gets isolated notes, attachments, Trash, and MCP tokens.",
     username: "Username",
     usernamePlaceholder: "For example: alex",
@@ -580,6 +586,7 @@ export const enUS = {
     passwordMismatch: "The new passwords do not match.",
     newPasswordTooShort: "The new password must be at least 8 characters.",
     changeFailed: "Unable to change the password. Please try again.",
+    demoReadOnly: "The demo environment uses fixed login credentials and does not allow changing the password.",
   },
   mcp: {
     createdTitle: "API Token created",

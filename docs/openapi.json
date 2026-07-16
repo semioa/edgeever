@@ -1278,6 +1278,9 @@
           "authenticated": {
             "type": "boolean"
           },
+          "demoMode": {
+            "type": "boolean"
+          },
           "user": {
             "oneOf": [
               {
@@ -1289,7 +1292,7 @@
             ]
           }
         },
-        "required": ["authRequired", "authenticated", "user"]
+        "required": ["authRequired", "authenticated", "demoMode", "user"]
       },
       "AuthUser": {
         "type": "object",

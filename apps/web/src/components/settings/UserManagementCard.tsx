@@ -87,7 +87,7 @@ export const UserManagementCard = () => {
         <CardContent className="grid gap-2 p-4 pt-0">
           {usersQuery.isLoading ? <p className="text-sm text-slate-500">{t("users.loading")}</p> : null}
           {usersQuery.data?.users.map((user) => (
-            <div key={user.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 p-3">
+            <div key={user.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-card/40 p-3">
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-slate-800">{user.displayName || user.username}</p>
                 <p className="truncate text-xs text-slate-500">@{user.username} · {t(`users.roles.${user.role}`)}</p>

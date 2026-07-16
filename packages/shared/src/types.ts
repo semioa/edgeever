@@ -129,6 +129,7 @@ export type InstanceUser = AuthUser & {
 export type AuthSession = {
   authRequired: boolean;
   authenticated: boolean;
+  demoMode: boolean;
   user: AuthUser | null;
   sessionToken?: string;
 };
