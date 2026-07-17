@@ -13,7 +13,11 @@ EdgeEver is an open-source, self-hosted, Cloudflare-native notes workspace. It k
 
 Many long-time Evernote users only need a reliable, open, responsive personal knowledge base. But modern commercial notes apps are often heavier than necessary, harder to migrate away from, and increasingly shaped by subscription and add-on features.
 
+Some may ask: why not migrate everything to the more open Obsidian? It was actually the first option I tried. But after using it for a while, I found it still too heavy for quick capture, especially on mobile. The official multi-device sync service costs $5 per month, while third-party sync solutions are too much hassle. So I ultimately abandoned the idea.
+
 EdgeEver fills that gap: familiar notes interaction, open data, API access, MCP support, and self-hosted deployment that is practical for individuals.
+
+My current best practice is to use EdgeEver to quickly capture ideas and reminders as a raw material repository. When the content needs structured organization, I use MCP to let AI integrate it into Obsidian, Notion Database, or Feishu Bitable.
 
 ## Online Demo
 
